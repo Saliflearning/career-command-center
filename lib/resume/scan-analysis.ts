@@ -242,7 +242,7 @@ function extractJdTerms(jobDescription: string): JdTerm[] {
     .map((segment) =>
       normalize(segment)
         .split(" ")
-        .map((word) => word.replace(/^[.,&-]+|[.,&-]+$/g, ""))
+        .map(trimTokenPunctuation)
         .filter(Boolean)
     )
     .filter((segment) => segment.length > 0);
@@ -325,14 +325,14 @@ function extractJdTerms(jobDescription: string): JdTerm[] {
   const rawNamedTokens = requirementText.split(/[^A-Za-z0-9+#.&-]+/).filter(Boolean);
   const titleTokenCounts = new Map<string, number>();
   for (const raw of rawNamedTokens) {
-    const cleaned = raw.replace(/^[.,&-]+|[.,&-]+$/g, "");
+    const cleaned = trimTokenPunctuation(raw);
     if (/^[A-Z][a-z][A-Za-z0-9+#.&-]*$/.test(cleaned)) {
       const lower = cleaned.toLowerCase();
       titleTokenCounts.set(lower, (titleTokenCounts.get(lower) ?? 0) + 1);
     }
   }
   for (const raw of rawNamedTokens) {
-    const cleaned = raw.replace(/^[.,&-]+|[.,&-]+$/g, "");
+    const cleaned = trimTokenPunctuation(raw);
     if (cleaned.length < 2 || cleaned.length > 30) continue;
     const lower = cleaned.toLowerCase();
     if (isStop(lower)) continue;
@@ -357,13 +357,19 @@ function extractJdTerms(jobDescription: string): JdTerm[] {
     for (const slashAcronym of context.text.match(/\b[A-Z]{2,}(?:\/[A-Z]{2,})+\b/g) ?? []) {
       namedSet.add(normalize(slashAcronym));
     }
-    const list = context.text.match(/\b(?:such as|including|experience with|proficiency in|using)\s+(.+?)(?:[.;]|$)/i)?.[1];
+    const list = extractIntroducedList(context.text);
     if (list) {
-      for (const item of list.split(/,|\s+or\s+|\s+and\s+/i)) {
+      for (const item of splitDelimitedList(list)) {
         const candidate = normalize(
-          item
-            .replace(/\b(?:required|preferred|skills?|experience)\b.*$/i, "")
-            .replace(/\bsystems?\b.*$/i, "")
+          truncateAtAnyWord(item, [
+            "required",
+            "preferred",
+            "skill",
+            "skills",
+            "experience",
+            "system",
+            "systems",
+          ])
         ).trim();
         if (candidate && candidate.split(" ").length <= 3) namedSet.add(candidate);
       }
@@ -444,7 +450,7 @@ function extractJdTerms(jobDescription: string): JdTerm[] {
     const roleForScoring = detectedRole.split(/[,;]/, 1)[0];
     const titleWords = normalize(roleForScoring.replace(/[([{][^)\]}]*[)\]}]/g, " "))
       .split(" ")
-      .map((word) => word.replace(/^[.,&-]+|[.,&-]+$/g, ""))
+      .map(trimTokenPunctuation)
       .filter((word) =>
         word && (!isStop(word) || SHORT_TERM_ALLOWLIST.test(word)) && !PHRASE_CONNECTORS.has(word)
       );
@@ -527,12 +533,129 @@ function extractJdTerms(jobDescription: string): JdTerm[] {
 function cleanScoredTerm(value: string) {
   return normalize(value)
     .split(" ")
-    .map((word) => word.replace(/^[.,&-]+|[.,&-]+$/g, ""))
+    .map(trimTokenPunctuation)
     .filter(Boolean)
     .join(" ");
 }
 
-const EXPLICIT_REQUIREMENT_HEADING = /^(?:(?:minimum|required|preferred)\s+)?(?:requirements?|qualifications?|skills?)\s*:?\s*$|^(?:candidates should|preferences?|what you(?:'|\u2019)ll need|what you bring|candidate profile|success measures)\s*:?\s*$/i;
+function trimTokenPunctuation(value: string) {
+  let start = 0;
+  let end = value.length;
+  while (start < end && ".,&-".includes(value[start])) start += 1;
+  while (end > start && ".,&-".includes(value[end - 1])) end -= 1;
+  return value.slice(start, end);
+}
+
+function trimTrailingCharacters(value: string, characters: string) {
+  let end = value.length;
+  while (end > 0 && characters.includes(value[end - 1])) end -= 1;
+  return value.slice(0, end);
+}
+
+function normalizeHeading(value: string) {
+  return normalize(trimTrailingCharacters(value.trim(), ":")).trim();
+}
+
+function isExplicitRequirementHeading(value: string) {
+  const heading = normalizeHeading(value);
+  const baseHeadings = new Set([
+    "requirement",
+    "requirements",
+    "qualification",
+    "qualifications",
+    "skill",
+    "skills",
+  ]);
+  if (baseHeadings.has(heading)) return true;
+  for (const qualifier of ["minimum", "required", "preferred"]) {
+    if (baseHeadings.has(heading.slice(qualifier.length + 1)) && heading.startsWith(`${qualifier} `)) {
+      return true;
+    }
+  }
+  return new Set([
+    "candidates should",
+    "preference",
+    "preferences",
+    "what you ll need",
+    "what you bring",
+    "candidate profile",
+    "success measures",
+  ]).has(heading);
+}
+
+function extractIntroducedList(value: string) {
+  const lower = value.toLowerCase();
+  for (const marker of [
+    "such as",
+    "including",
+    "experience with",
+    "proficiency in",
+    "using",
+  ]) {
+    const markerIndex = lower.indexOf(marker);
+    if (markerIndex < 0) continue;
+    const start = markerIndex + marker.length;
+    let end = value.length;
+    for (const terminator of [".", ";"]) {
+      const terminatorIndex = value.indexOf(terminator, start);
+      if (terminatorIndex >= 0) end = Math.min(end, terminatorIndex);
+    }
+    const extracted = value.slice(start, end).trim();
+    if (extracted) return extracted;
+  }
+  return null;
+}
+
+function splitDelimitedList(value: string) {
+  const segments = value.replaceAll(",", "\n").replaceAll(";", "\n").split("\n");
+  const result: string[] = [];
+  for (const segment of segments) {
+    let current: string[] = [];
+    for (const word of segment.trim().split(/\s+/)) {
+      if (word.toLowerCase() === "and" || word.toLowerCase() === "or") {
+        if (current.length) result.push(current.join(" "));
+        current = [];
+      } else if (word) {
+        current.push(word);
+      }
+    }
+    if (current.length) result.push(current.join(" "));
+  }
+  return result;
+}
+
+function truncateAtAnyWord(value: string, words: string[]) {
+  let end = value.length;
+  const lower = value.toLowerCase();
+  for (const word of words) {
+    let cursor = 0;
+    while (cursor < lower.length) {
+      const index = lower.indexOf(word, cursor);
+      if (index < 0) break;
+      const before = index === 0 ? "" : lower[index - 1];
+      const afterIndex = index + word.length;
+      const after = afterIndex >= lower.length ? "" : lower[afterIndex];
+      if (!isAsciiWordCharacter(before) && !isAsciiWordCharacter(after)) {
+        end = Math.min(end, index);
+        break;
+      }
+      cursor = index + 1;
+    }
+  }
+  return value.slice(0, end);
+}
+
+function isAsciiWordCharacter(character: string) {
+  if (!character) return false;
+  const code = character.charCodeAt(0);
+  return (
+    (code >= 48 && code <= 57) ||
+    (code >= 65 && code <= 90) ||
+    (code >= 97 && code <= 122) ||
+    character === "_"
+  );
+}
+
 const EXPLICIT_REQUIREMENT_PREFIX = /^(?:(?:\d+\+?\s+years?(?:\s+of)?\s+)?(?:hands-on\s+|progressive\s+|technical\s+)?experience\s+(?:with|in|supporting|delivering|performing|providing|writing)|advanced\s+proficiency\s+in|proficiency\s+in|strong\s+knowledge\s+of|knowledge\s+of|familiarity\s+with|understanding\s+of|show\s+strong|have\s+experience(?:\s+in)?|bachelor(?:'|\u2019)?s\s+degree\s+in|document|create|develop|support|conduct|perform)\s+/i;
 
 function extractExplicitRequirementPhrases(value: string) {
@@ -543,7 +666,7 @@ function extractExplicitRequirementPhrases(value: string) {
     const line = rawLine.trim();
     if (!line) continue;
 
-    if (EXPLICIT_REQUIREMENT_HEADING.test(line)) {
+    if (isExplicitRequirementHeading(line)) {
       inRequirementBlock = true;
       continue;
     }
@@ -557,8 +680,8 @@ function extractExplicitRequirementPhrases(value: string) {
     const prefix = withoutBullet.match(EXPLICIT_REQUIREMENT_PREFIX);
     if (!prefix) continue;
 
-    const requirement = withoutBullet.slice(prefix[0].length).replace(/[.!?]+$/, "");
-    for (const part of requirement.split(/\s+(?:and|or)\s+|[,;]/i)) {
+    const requirement = trimTrailingCharacters(withoutBullet.slice(prefix[0].length), ".!?");
+    for (const part of splitDelimitedList(requirement)) {
       const words = normalize(part)
         .split(" ")
         .filter((word) => word && !/^(?:a|an|the|etc|related)$/.test(word));
@@ -582,7 +705,7 @@ function extractActionRequirementPhrases(contexts: RequirementContext[]) {
       .replace(REQUIREMENT_ACTION, "")
       .replace(/^\s+and\s+(?:build|create|develop|document|maintain|provide|support|write)\b/i, "")
       .trim();
-    const parts = withoutLead.split(/[,;]|\s+and\s+(?=(?:administer|build|conduct|create|develop|document|maintain|perform|provide|support|track|uphold|write)\b)|\s+and\s+/i);
+    const parts = splitDelimitedList(withoutLead);
 
     for (const rawPart of parts) {
       const normalized = normalize(
@@ -670,9 +793,113 @@ function isJobBoardDisclaimer(line: string) {
   );
 }
 
-const NON_EVIDENCE_BLOCK_HEADING = /^(?:pay|salary|compensation|job type|shift and schedule|shift availability|work schedule|hiring salary range|we also offer great benefits(?:, including)?|benefits?)\s*:?\s*$/i;
-const NON_EVIDENCE_INLINE_ROW = /^(?:pay|salary|compensation|benefits?|work location)\s*:\s*\S/i;
-const JOB_CONTENT_HEADING = /^(?:full job description|about the job|introduction|about this role|overview|duties|this position will|responsibilities|requirements|minimum requirements|preferred qualifications|preferences|candidates should|qualifications|role purpose|core responsibilities|success measures|profile|experience|language)\s*:?\s*$/i;
+const NON_EVIDENCE_BLOCK_HEADINGS = new Set([
+  "pay",
+  "salary",
+  "compensation",
+  "job type",
+  "shift and schedule",
+  "shift availability",
+  "work schedule",
+  "hiring salary range",
+  "we also offer great benefits",
+  "we also offer great benefits including",
+  "benefit",
+  "benefits",
+]);
+
+const NON_EVIDENCE_INLINE_LABELS = new Set([
+  "pay",
+  "salary",
+  "compensation",
+  "benefit",
+  "benefits",
+  "work location",
+]);
+
+const JOB_CONTENT_HEADINGS = new Set([
+  "full job description",
+  "about the job",
+  "introduction",
+  "about this role",
+  "overview",
+  "duties",
+  "this position will",
+  "responsibilities",
+  "requirements",
+  "minimum requirements",
+  "preferred qualifications",
+  "preferences",
+  "candidates should",
+  "qualifications",
+  "role purpose",
+  "core responsibilities",
+  "success measures",
+  "profile",
+  "experience",
+  "language",
+]);
+
+const INLINE_CONTEXT_HEADINGS = [
+  "minimum requirements",
+  "required qualifications",
+  "requirements",
+  "qualifications",
+  "candidates should",
+  "what you ll need",
+  "preferences",
+  "preferred qualifications",
+  "nice to have",
+  "this position will",
+  "responsibilities",
+  "duties",
+  "core responsibilities",
+  "about this role",
+  "role purpose",
+  "overview",
+  "introduction",
+].sort((a, b) => b.length - a.length);
+
+function isNonEvidenceBlockHeading(value: string) {
+  return NON_EVIDENCE_BLOCK_HEADINGS.has(normalizeHeading(value));
+}
+
+function isJobContentHeading(value: string) {
+  return JOB_CONTENT_HEADINGS.has(normalizeHeading(value));
+}
+
+function isExcludedQuestionHeading(value: string) {
+  const heading = normalizeHeading(value);
+  return (
+    heading === "special requirement" ||
+    heading === "special requirements" ||
+    heading === "application question" ||
+    heading === "application questions"
+  );
+}
+
+function isNonEvidenceInlineRow(value: string) {
+  const colon = value.indexOf(":");
+  if (colon < 0 || !value.slice(colon + 1).trim()) return false;
+  return NON_EVIDENCE_INLINE_LABELS.has(normalizeHeading(value.slice(0, colon)));
+}
+
+function parseInlineContextHeading(value: string) {
+  const normalizedLine = normalize(value);
+  for (const heading of INLINE_CONTEXT_HEADINGS) {
+    if (normalizedLine === heading) {
+      return { heading, remainder: "" };
+    }
+    if (normalizedLine.startsWith(`${heading} `)) {
+      return {
+        heading,
+        remainder: normalizedLine.slice(heading.length + 1).trim(),
+      };
+    }
+  }
+  return null;
+}
+
 const JOB_BOARD_NOISE_LINE = /^(?:company logo for\b|responses? managed\b|apply|saved|share|job match\b|show match details|tailor my resume|help me stand out|create cover letter|beta\b|is this information helpful|\d+\s+people clicked apply|see yourself here!?|required question)\b/i;
 const JOB_BOARD_LOCATION_OR_MODE = /(?:\b\d{5}(?:-\d{4})?\b|\b\d+\s+(?:day|week|month)s? ago\b|^(?:hybrid|remote|on[- ]?site|full[- ]?time|part[- ]?time)$)/i;
 
@@ -694,20 +921,20 @@ function sanitizeJobDescriptionForScoring(value: string) {
       if (/^(?:0?1|supplemental questions?)$/i.test(line)) return kept.join("\n");
       if (isJobBoardDisclaimer(line) || JOB_BOARD_NOISE_LINE.test(line)) continue;
       if (JOB_BOARD_LOCATION_OR_MODE.test(line) || /\$\s?\d/.test(line)) continue;
-      if (NON_EVIDENCE_BLOCK_HEADING.test(line)) {
+      if (isNonEvidenceBlockHeading(line)) {
         skippingBlock = true;
         continue;
       }
-      if (JOB_CONTENT_HEADING.test(line)) {
+      if (isJobContentHeading(line)) {
         skippingBlock = false;
         kept.push(line);
         continue;
       }
-      if (/^(?:special requirements?|application questions?)\s*:?\s*$/i.test(line)) {
+      if (isExcludedQuestionHeading(line)) {
         skippingBlock = true;
         continue;
       }
-      if (NON_EVIDENCE_INLINE_ROW.test(line)) continue;
+      if (isNonEvidenceInlineRow(line)) continue;
       if (!skippingBlock) kept.push(line);
     }
   }
@@ -723,17 +950,15 @@ function extractRequirementContexts(value: string): RequirementContext[] {
     let line = rawLine.trim();
     if (!line) continue;
 
-    const inlineHeading = line.match(
-      /^(minimum requirements?|required qualifications?|requirements?|qualifications?|candidates should|what you(?:'|\u2019)ll need|preferences?|preferred qualifications?|nice to have|this position will|responsibilities|duties|core responsibilities|about this role|role purpose|overview|introduction)\s*:?\s*(.*)$/i
-    );
+    const inlineHeading = parseInlineContextHeading(line);
     if (inlineHeading) {
-      const heading = inlineHeading[1].toLowerCase();
+      const heading = inlineHeading.heading;
       importance = /minimum|required|requirements|qualifications|candidates should|what you/.test(heading)
         ? "critical"
         : /preferences?|preferred|nice to have|this position|responsibilities|duties|role purpose/.test(heading)
           ? "important"
           : "supporting";
-      line = inlineHeading[2].trim();
+      line = inlineHeading.remainder;
       if (!line) continue;
     } else if (isJobSectionLabel(line)) {
       continue;
@@ -767,7 +992,7 @@ function bestRequirementContext(term: string, contexts: RequirementContext[]) {
 
 function isJobSectionLabel(line: string) {
   const value = line.trim();
-  return JOB_CONTENT_HEADING.test(value) || /^job details\s*:?[\s]*$/i.test(value);
+  return isJobContentHeading(value) || normalizeHeading(value) === "job details";
 }
 
 function isStop(word: string) {
@@ -882,7 +1107,7 @@ function buildResumeIndex(resumeText: string): ResumeIndex {
     const words = new Set(
       normalize(value)
         .split(" ")
-        .map((word) => word.replace(/^[.,-]+|[.,-]+$/g, ""))
+        .map(trimTokenPunctuation)
         .filter(Boolean)
     );
     return { words, stems: Array.from(words, stem) };
@@ -937,7 +1162,7 @@ function wordDirectlyMatches(index: WordIndex, word: string): boolean {
 function findResumeEvidence(index: ResumeIndex, term: string): string | null {
   const termWords = normalize(term)
     .split(" ")
-    .map((word) => word.replace(/^[.,-]+|[.,-]+$/g, ""))
+    .map(trimTokenPunctuation)
     .filter((word) => word && !PHRASE_CONNECTORS.has(word));
   if (termWords.length === 0) return null;
 
