@@ -66,7 +66,7 @@ This makes failures observable and recoverable. Intermediate work is stored inst
 
 ## Run locally
 
-Requirements: Node.js 20, npm, and PostgreSQL. The PDF path additionally requires Docker.
+Requirements: Node.js 24 or newer, npm, and PostgreSQL. The PDF path additionally requires Docker.
 
 ```bash
 cp .env.example .env.local
