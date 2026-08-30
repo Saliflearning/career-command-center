@@ -1,0 +1,310 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ---------------------------------------------------------------------------
+// NextAuth required models (@auth/prisma-adapter v1)
+// These must exist for PrismaAdapter to manage OAuth accounts, sessions,
+// and email magic-link verification tokens.
+// ---------------------------------------------------------------------------
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ---------------------------------------------------------------------------
+// Application models
+// ---------------------------------------------------------------------------
+
+model User {
+  id           String           @id @default(cuid())
+  email        String           @unique
+  emailVerified DateTime?
+  name         String?
+  image        String?
+  location       String?
+  linkedinUrl    String?
+  hashedPassword String?
+  createdAt      DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+  accounts     Account[]
+  sessions     Session[]
+  careerMemory CareerMemory?
+  resumes      Resume[]
+  applications Application[]
+  preferences  UserPreferences?
+}
+
+model CareerMemory {
+  id           String          @id @default(cuid())
+  userId       String          @unique
+  user         User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  jobs         WorkHistory[]
+  education    Education[]
+  skills       Skill[]
+  certs        Certification[]
+  projects     Project[]
+  achievements Achievement[]
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+}
+
+model WorkHistory {
+  id             String       @id @default(cuid())
+  careerMemoryId String
+  careerMemory   CareerMemory @relation(fields: [careerMemoryId], references: [id], onDelete: Cascade)
+  company        String
+  title          String
+  startDate      DateTime
+  endDate        DateTime?
+  current        Boolean      @default(false)
+  location       String?
+  employmentType String?
+  bullets        Bullet[]
+  sourceType     SourceType
+  verified       Boolean      @default(false)
+  locked         Boolean      @default(false)
+  sortOrder      Int          @default(0)
+}
+
+model Bullet {
+  id            String         @id @default(cuid())
+  workHistoryId String
+  workHistory   WorkHistory    @relation(fields: [workHistoryId], references: [id], onDelete: Cascade)
+  content       String
+  contentType   ContentType
+  metrics       String[]
+  keywords      String[]
+  locked        Boolean        @default(false)
+  usedInResumes ResumeBullet[]
+}
+
+model Education {
+  id             String       @id @default(cuid())
+  careerMemoryId String
+  careerMemory   CareerMemory @relation(fields: [careerMemoryId], references: [id], onDelete: Cascade)
+  degree         String
+  school         String
+  graduationDate DateTime?
+  expected       Boolean      @default(false)
+  gpa            String?
+  sourceType     SourceType
+}
+
+model Skill {
+  id             String       @id @default(cuid())
+  careerMemoryId String
+  careerMemory   CareerMemory @relation(fields: [careerMemoryId], references: [id], onDelete: Cascade)
+  name           String
+  qualifier      String?
+  category       String?
+  sourceType     SourceType
+}
+
+model Certification {
+  id             String       @id @default(cuid())
+  careerMemoryId String
+  careerMemory   CareerMemory @relation(fields: [careerMemoryId], references: [id], onDelete: Cascade)
+  name           String
+  issuer         String?
+  year           Int?
+  sourceType     SourceType
+}
+
+model Project {
+  id             String       @id @default(cuid())
+  careerMemoryId String
+  careerMemory   CareerMemory @relation(fields: [careerMemoryId], references: [id], onDelete: Cascade)
+  name           String
+  description    String?
+  url            String?
+  technologies   String[]
+  sourceType     SourceType
+}
+
+model Achievement {
+  id             String       @id @default(cuid())
+  careerMemoryId String
+  careerMemory   CareerMemory @relation(fields: [careerMemoryId], references: [id], onDelete: Cascade)
+  description    String
+  sourceType     SourceType
+}
+
+model Resume {
+  id            String          @id @default(cuid())
+  userId        String
+  user          User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  version       Int             @default(1)
+  targetRole    String
+  targetCompany String?
+  jdText        String?
+  jdKeywords    String[]
+  roleType      RoleType?
+  tone          String?          // User-selected tone: Executive, Technical, Leadership-first, Startup
+  structure     String?          // User-selected structure: Hybrid Executive, Chronological, Functional, Compact
+  state         ResumeState     @default(UPLOADED)
+  sections      ResumeSection[]
+  bullets       ResumeBullet[]
+  latexSource    String?
+  pdfUrl         String?
+  atsScore       Int?
+  keywordScore   Int?
+  visualScore    Int?
+  pageCount      Int?
+  // Persisted agent outputs — prevents re-run on crash recovery (Golden Path Sprint)
+  jdAnalysisJson Json?    // Serialised JDAnalysis; read before calling runJDAnalyst
+  strategyJson   Json?    // Serialised ResumeStrategy; read before calling runStrategy
+  summaryText    String?  // Career summary generated by Summary Writer agent
+  // Pipeline observability
+  pipelineStartedAt  DateTime?
+  pipelineFinishedAt DateTime?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  exportedAt     DateTime?
+  application    Application?
+}
+
+model ResumeSection {
+  id        String  @id @default(cuid())
+  resumeId  String
+  resume    Resume  @relation(fields: [resumeId], references: [id], onDelete: Cascade)
+  name      String
+  visible   Boolean @default(true)
+  sortOrder Int     @default(0)
+  content   String?
+}
+
+model ResumeBullet {
+  id       String @id @default(cuid())
+  resumeId String
+  resume   Resume @relation(fields: [resumeId], references: [id], onDelete: Cascade)
+  bulletId String
+  bullet   Bullet @relation(fields: [bulletId], references: [id])
+}
+
+model Application {
+  id           String            @id @default(cuid())
+  userId       String
+  user         User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  resumeId     String            @unique
+  resume       Resume            @relation(fields: [resumeId], references: [id])
+  company      String
+  role         String
+  status       ApplicationStatus @default(APPLIED)
+  appliedAt    DateTime?
+  followUpAt   DateTime?
+  notes        String?
+  interviewLog String[]
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+}
+
+model UserPreferences {
+  id                    String   @id @default(cuid())
+  userId                String   @unique
+  user                  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  preferredTone         String   @default("professional")
+  rewriteAggressiveness Int      @default(50)
+  bulletStyle           String   @default("impact")
+  lengthPreference      String   @default("auto")
+  emailNotifications    Boolean  @default(true)
+  aiSuggestions         Boolean  @default(true)
+  autoSave              Boolean  @default(true)
+  trackingEnabled       Boolean  @default(true)
+  memoryEnabled         Boolean  @default(true)
+  defaultSectionOrder   String[]
+  preferredRoleType     String?
+}
+
+/// Encrypted server-side key-value store for AI provider keys and config.
+/// Only the Supabase service role can read this table (RLS enabled, no user policies).
+model SystemConfig {
+  key       String   @id
+  value     String   // AES-256-GCM encrypted ciphertext (hex)
+  iv        String   // 12-byte nonce (hex)
+  tag       String   // 16-byte auth tag (hex)
+  updatedAt DateTime @updatedAt
+}
+
+enum SourceType {
+  UPLOADED
+  MANUAL
+  GENERATED
+}
+
+enum ContentType {
+  VERIFIED
+  GENERATED
+  USER_EDITED
+}
+
+enum ResumeState {
+  UPLOADED
+  PARSED
+  NORMALIZED
+  VERIFIED
+  JD_ANALYZED
+  STRATEGY_READY
+  GENERATING
+  QA_REVIEWED
+  USER_EDITING
+  EXPORTED
+  TRACKED
+  FAILED
+}
+
+enum ApplicationStatus {
+  APPLIED
+  INTERVIEWING
+  OFFER
+  REJECTED
+  WITHDRAWN
+}
+
+enum RoleType {
+  TECHNICAL
+  OPERATIONS
+  BUSINESS
+  DATA
+  FINANCE
+  ACADEMIC
+  FEDERAL
+  CREATIVE
+}

@@ -1,0 +1,48 @@
+Jordan Smith
+San Francisco, CA | (415) 555-0192 | jordan.smith@example.com | linkedin.com/in/jordansmith
+
+WORK EXPERIENCE
+
+Stripe — San Francisco, CA
+Senior Product Manager | March 2021 – Present | Full-Time
+- Led the redesign of the Stripe Dashboard onboarding flow, reducing time-to-first-charge from 4.2 days to 1.8 days for new merchants
+- Managed a cross-functional team of 8 engineers, 2 designers, and 1 data analyst across three time zones
+- Defined and owned the OKR framework for the Merchant Growth squad, tracking 12 KPIs across 3 product lines
+- Launched Stripe Tax in 4 new markets (Canada, Australia, Germany, France), generating $2M in incremental ARR within 6 months
+- Collaborated with Sales and Customer Success to reduce merchant churn by 18% through proactive feature adoption campaigns
+
+Airbnb — San Francisco, CA
+Product Manager | July 2018 – February 2021 | Full-Time
+- Owned the Host Tools product area, serving 4 million active hosts globally
+- Shipped the Smart Pricing 2.0 feature, which increased host revenue by an average of 12% per booking
+- Ran 40+ A/B experiments per quarter using internal experimentation platform; maintained a 34% win rate
+- Partnered with Data Science to build a host health score model that identified at-risk hosts 30 days earlier than previous heuristics
+- Wrote PRDs, launch plans, and stakeholder readouts for executive review; presented quarterly to VP and CPO
+
+Intuit — Mountain View, CA
+Associate Product Manager (APM Program) | August 2016 – June 2018 | Full-Time
+- Rotated across QuickBooks Online, TurboTax, and Mint over 24 months
+- Reduced QuickBooks invoice creation time by 22% through a simplified UX flow (basic SQL used for analysis)
+- Built the business case for Mint's bill negotiation feature, which reached 250K users in first 6 months
+- Facilitated weekly sprint ceremonies and maintained the product backlog for a 6-person engineering squad
+
+EDUCATION
+
+Stanford University — Stanford, CA
+Master of Science, Management Science and Engineering | Expected June 2016
+
+University of Michigan — Ann Arbor, MI
+Bachelor of Science, Computer Science | May 2014
+GPA: 3.7 / 4.0
+
+CERTIFICATIONS
+- Certified Scrum Product Owner (CSPO) — Scrum Alliance, 2019
+- AWS Certified Cloud Practitioner — Amazon Web Services, 2022
+
+SKILLS
+- Product strategy, roadmap planning, OKR frameworks
+- Data analysis: some experience with SQL (basic), Amplitude, Mixpanel, Tableau
+- A/B testing, experimentation design, statistical significance
+- Stakeholder management, executive communication, cross-functional leadership
+- Familiarity with APIs and basic web development concepts
+- Tools: Jira, Confluence, Figma, Notion, Linear, Looker

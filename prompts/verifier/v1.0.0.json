@@ -1,0 +1,353 @@
+{
+  "version": "1.0.0",
+  "agent": "verifier",
+  "description": "Verifies each generated bullet and resume section against the user's career profile. Runs after every Bullet Writer pass. Enforces all 9 accuracy and quality checks defined in CLAUDE.md §8.4. Returns structured pass/fail per check with specific failure reasons. E8 builds the agent; this prompt file defines the check rules.",
+  "tier": "tier1",
+  "token_budget": {
+    "max_input_tokens": 300,
+    "max_output_tokens": 100,
+    "note": "Verifier is called once per bullet or per section — keep inputs small. Input is the bullet text plus its source evidence. Output is a compact JSON verdict."
+  },
+  "input_schema": {
+    "type": "object",
+    "required": ["bullet", "sourceEvidence"],
+    "properties": {
+      "bullet": {
+        "type": "string",
+        "description": "The generated bullet text to verify."
+      },
+      "sourceEvidence": {
+        "type": "object",
+        "description": "The career profile entry this bullet was generated from (company, title, dates, user-stated facts).",
+        "required": ["company", "title", "startDate"],
+        "properties": {
+          "company": { "type": "string" },
+          "title": { "type": "string" },
+          "startDate": { "type": "string" },
+          "endDate": { "type": "string" },
+          "userStatedFacts": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Exact facts, metrics, and skills the user stated — the only allowed basis for content."
+          },
+          "userStatedSkills": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Skills the user mentioned, including any qualifiers (e.g. 'basic SQL', 'exposure to Kubernetes')."
+          }
+        }
+      },
+      "jdKeywords": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Optional — JD keywords for tailoring check (CHECK-7)."
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object",
+    "required": ["verdict", "checks", "failureReasons"],
+    "properties": {
+      "verdict": {
+        "type": "string",
+        "enum": ["passed", "failed"],
+        "description": "Overall pass/fail. 'failed' if ANY check fails."
+      },
+      "checks": {
+        "type": "object",
+        "description": "Individual result for each of the 9 checks.",
+        "required": [
+          "CHECK_1_FACTS_MATCH",
+          "CHECK_2_NO_FABRICATED_SKILLS",
+          "CHECK_3_DEGREE_STATUS",
+          "CHECK_4_METRICS_MATCH",
+          "CHECK_5_NO_CONTENT_CROSSOVER",
+          "CHECK_6_NO_EM_DASHES",
+          "CHECK_7_TAILORED_TO_JD",
+          "CHECK_8_NO_FORBIDDEN_BUZZWORDS",
+          "CHECK_9_QUALIFIER_RULE"
+        ],
+        "properties": {
+          "CHECK_1_FACTS_MATCH": {
+            "type": "string",
+            "enum": ["passed", "failed", "not_applicable"],
+            "description": "Company name, title, and dates match user-provided data exactly."
+          },
+          "CHECK_2_NO_FABRICATED_SKILLS": {
+            "type": "string",
+            "enum": ["passed", "failed", "not_applicable"],
+            "description": "No skills or tools appear that the user did not mention."
+          },
+          "CHECK_3_DEGREE_STATUS": {
+            "type": "string",
+            "enum": ["passed", "failed", "not_applicable"],
+            "description": "Degree language is accurate: conferred vs. expected/in progress."
+          },
+          "CHECK_4_METRICS_MATCH": {
+            "type": "string",
+            "enum": ["passed", "failed", "not_applicable"],
+            "description": "All numbers and metrics in the bullet match what the user stated."
+          },
+          "CHECK_5_NO_CONTENT_CROSSOVER": {
+            "type": "string",
+            "enum": ["passed", "failed", "not_applicable"],
+            "description": "No content from one job has been placed under a different job."
+          },
+          "CHECK_6_NO_EM_DASHES": {
+            "type": "string",
+            "enum": ["passed", "failed", "not_applicable"],
+            "description": "No em dashes (—) appear in the bullet text."
+          },
+          "CHECK_7_TAILORED_TO_JD": {
+            "type": "string",
+            "enum": ["passed", "failed", "not_applicable"],
+            "description": "Bullet uses relevant JD keywords naturally (not_applicable if no JD provided)."
+          },
+          "CHECK_8_NO_FORBIDDEN_BUZZWORDS": {
+            "type": "string",
+            "enum": ["passed", "failed", "not_applicable"],
+            "description": "No forbidden buzzwords: leveraged, spearheaded, synergized, dynamic, results-driven, passionate, detail-oriented, innovative, strategic thinker."
+          },
+          "CHECK_9_QUALIFIER_RULE": {
+            "type": "string",
+            "enum": ["passed", "failed", "not_applicable"],
+            "description": "Skill qualifiers from user profile (basic, exposure to, some experience) are preserved — not upgraded."
+          }
+        }
+      },
+      "failureReasons": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": ["check", "reason", "suggestedFix"],
+          "properties": {
+            "check": {
+              "type": "string",
+              "description": "Which check failed (e.g. CHECK_2_NO_FABRICATED_SKILLS)."
+            },
+            "reason": {
+              "type": "string",
+              "description": "Specific explanation of what failed and why."
+            },
+            "suggestedFix": {
+              "type": "string",
+              "description": "Concrete instruction for the Bullet Writer to correct this on retry."
+            }
+          }
+        },
+        "description": "Empty array if verdict is 'passed'. One entry per failed check."
+      },
+      "bulletCount": {
+        "type": "number",
+        "description": "Optional — if checking an entire role section, the total bullet count (expected 3–6)."
+      }
+    }
+  },
+  "system_prompt": "You are the Verifier agent for Career Command Center.\n\nYour job is to verify a single generated bullet against the user's source evidence.\nYou run 9 checks. If ANY check fails, the verdict is 'failed'.\nReturn ONLY valid JSON — no markdown, no explanation, no preamble.\n\nThe 9 checks are defined below. Apply each check to the bullet text and source evidence.\n\n---\n\nCHECK 1 — FACTS MATCH\nRule: Every company name, title, and date in the bullet must match what the user provided in sourceEvidence exactly.\nFail condition: Any company name, title, or date in the bullet differs from the source evidence.\nExample failure: Bullet says \"VP of Engineering at Acme\" but source says \"Senior Engineer at Acme Corp\".\n\nCHECK 2 — NO FABRICATED SKILLS\nRule: No skills, tools, technologies, or credentials may appear in the bullet that are not present in userStatedSkills or userStatedFacts.\nFail condition: The bullet references any skill, tool, or technology the user did not mention.\nExample failure: Bullet mentions 'Kubernetes' but user only listed 'Docker' in their skills.\n\nCHECK 3 — DEGREE STATUS\nRule: If the bullet references education, the degree status language must be accurate. 'Conferred' means the degree is complete. 'Expected' or 'in progress' means it is not yet complete. Never imply a degree is conferred if the user said it is in progress.\nFail condition: Bullet implies a degree is complete when source evidence says expected/in progress.\n\nCHECK 4 — METRICS MATCH\nRule: All numbers, percentages, dollar amounts, team sizes, or other metrics in the bullet must match what the user explicitly stated in userStatedFacts.\nFail condition: Any metric in the bullet differs from what the user stated, or the bullet includes metrics the user never mentioned.\nExample failure: User said 'reduced costs by 15%' but bullet says 'reduced costs by 30%'.\n\nCHECK 5 — NO CONTENT CROSSOVER\nRule: Content from one job must not appear under a different job. Each bullet must only reference facts, metrics, and skills from the specific role in sourceEvidence.\nFail condition: The bullet references a project, achievement, or responsibility from a different company or role.\n\nCHECK 6 — NO EM DASHES\nRule: Em dashes (—) are forbidden in all bullet text.\nFail condition: The bullet contains the character — (Unicode U+2014).\nNote: Regular hyphens (-) are allowed.\n\nCHECK 7 — TAILORED TO JD\nRule: The bullet should incorporate relevant JD keywords naturally where they apply to the user's actual experience. This check is not_applicable if no jdKeywords were provided.\nFail condition: The bullet ignores all JD keywords when at least one keyword clearly applies to the user's experience in this role.\n\nCHECK 8 — NO FORBIDDEN BUZZWORDS\nRule: The following words are permanently banned from all bullet text: leveraged, spearheaded, synergized, dynamic, results-driven, passionate, detail-oriented, innovative, strategic thinker, thought leader, guru, ninja, rockstar, disruptive.\nFail condition: The bullet contains any forbidden buzzword (case-insensitive).\n\nCHECK 9 — QUALIFIER RULE\nRule: If the user's profile includes a skill with a qualifier (e.g. 'basic SQL', 'exposure to Kubernetes', 'some experience with AWS'), that qualifier MUST be preserved in any reference to that skill. NEVER upgrade 'basic' to proficient, NEVER drop the qualifier entirely.\nFail condition: The bullet references a qualified skill without its qualifier (e.g. writes 'SQL' when user said 'basic SQL').\n\n---\n\nOutput format:\n{\n  \"verdict\": \"passed\" | \"failed\",\n  \"checks\": {\n    \"CHECK_1_FACTS_MATCH\": \"passed\" | \"failed\" | \"not_applicable\",\n    \"CHECK_2_NO_FABRICATED_SKILLS\": \"passed\" | \"failed\" | \"not_applicable\",\n    \"CHECK_3_DEGREE_STATUS\": \"passed\" | \"failed\" | \"not_applicable\",\n    \"CHECK_4_METRICS_MATCH\": \"passed\" | \"failed\" | \"not_applicable\",\n    \"CHECK_5_NO_CONTENT_CROSSOVER\": \"passed\" | \"failed\" | \"not_applicable\",\n    \"CHECK_6_NO_EM_DASHES\": \"passed\" | \"failed\" | \"not_applicable\",\n    \"CHECK_7_TAILORED_TO_JD\": \"passed\" | \"failed\" | \"not_applicable\",\n    \"CHECK_8_NO_FORBIDDEN_BUZZWORDS\": \"passed\" | \"failed\" | \"not_applicable\",\n    \"CHECK_9_QUALIFIER_RULE\": \"passed\" | \"failed\" | \"not_applicable\"\n  },\n  \"failureReasons\": [\n    {\n      \"check\": \"CHECK_N_NAME\",\n      \"reason\": \"Specific explanation of what failed\",\n      \"suggestedFix\": \"Concrete instruction for the Bullet Writer to correct this\"\n    }\n  ]\n}\n\nRules:\n- verdict is 'failed' if ANY check result is 'failed'.\n- Use 'not_applicable' only when the check genuinely cannot apply (e.g. CHECK_3 on a non-education bullet; CHECK_7 when no jdKeywords were provided).\n- failureReasons must have one entry per failed check — no more, no fewer.\n- suggestedFix must be a concrete instruction the Bullet Writer can act on immediately.\n- Return ONLY the JSON object.",
+  "retry_policy": {
+    "max_retries": 3,
+    "on_max_retries_exceeded": "Surface the specific failure reason to the user with options: accept as-is, edit manually, or retry. Never block export indefinitely.",
+    "note": "After 3 Verifier failures on the same bullet, the Bullet Writer is considered unable to fix the issue automatically."
+  },
+  "forbidden_patterns": [
+    "Do not mark a check as 'passed' if the failure condition is met",
+    "Do not invent failure reasons that are not based on the bullet and source evidence",
+    "Do not return markdown or explanation text alongside the JSON",
+    "Do not skip any of the 9 checks — all must appear in output"
+  ],
+  "checks_reference": [
+    {
+      "id": "CHECK_1_FACTS_MATCH",
+      "name": "Facts Match",
+      "category": "accuracy",
+      "description": "Company name, title, and dates in the bullet match source evidence exactly."
+    },
+    {
+      "id": "CHECK_2_NO_FABRICATED_SKILLS",
+      "name": "No Fabricated Skills",
+      "category": "accuracy",
+      "description": "No skills, tools, or credentials appear that the user did not mention."
+    },
+    {
+      "id": "CHECK_3_DEGREE_STATUS",
+      "name": "Degree Status Accuracy",
+      "category": "accuracy",
+      "description": "Degree language accurately reflects conferred vs. in-progress status."
+    },
+    {
+      "id": "CHECK_4_METRICS_MATCH",
+      "name": "Metrics Match",
+      "category": "accuracy",
+      "description": "All numbers and metrics match user-stated facts exactly."
+    },
+    {
+      "id": "CHECK_5_NO_CONTENT_CROSSOVER",
+      "name": "No Content Crossover",
+      "category": "accuracy",
+      "description": "Bullet content belongs to the correct role — no mixing between jobs."
+    },
+    {
+      "id": "CHECK_6_NO_EM_DASHES",
+      "name": "No Em Dashes",
+      "category": "formatting",
+      "description": "The em dash character (—) does not appear in the bullet."
+    },
+    {
+      "id": "CHECK_7_TAILORED_TO_JD",
+      "name": "Tailored to JD",
+      "category": "quality",
+      "description": "Bullet uses relevant JD keywords naturally where applicable."
+    },
+    {
+      "id": "CHECK_8_NO_FORBIDDEN_BUZZWORDS",
+      "name": "No Forbidden Buzzwords",
+      "category": "quality",
+      "description": "None of the permanently banned buzzwords appear in the bullet."
+    },
+    {
+      "id": "CHECK_9_QUALIFIER_RULE",
+      "name": "Qualifier Rule",
+      "category": "accuracy",
+      "description": "Skill qualifiers from user profile are preserved — never upgraded."
+    }
+  ],
+  "test_cases": [
+    {
+      "id": "tc-001",
+      "description": "Clean bullet — should pass all checks",
+      "input": {
+        "bullet": "Built Python microservices on AWS ECS handling 50,000 daily active users.",
+        "sourceEvidence": {
+          "company": "Acme Corp",
+          "title": "Senior Software Engineer",
+          "startDate": "2022-01",
+          "endDate": "2024-03",
+          "userStatedFacts": ["50,000 daily active users", "Python microservices", "AWS ECS"],
+          "userStatedSkills": ["Python", "AWS ECS", "Docker"]
+        },
+        "jdKeywords": ["Python", "AWS", "microservices"]
+      },
+      "expected_output": {
+        "verdict": "passed",
+        "failureReasons": []
+      },
+      "validation_rules": [
+        "verdict === 'passed'",
+        "failureReasons.length === 0",
+        "checks.CHECK_2_NO_FABRICATED_SKILLS === 'passed'",
+        "checks.CHECK_9_QUALIFIER_RULE === 'passed'"
+      ]
+    },
+    {
+      "id": "tc-002",
+      "description": "Qualifier rule violation — 'basic SQL' upgraded to plain 'SQL'",
+      "input": {
+        "bullet": "Analyzed sales data using SQL and Excel to generate monthly reports.",
+        "sourceEvidence": {
+          "company": "Corp Inc",
+          "title": "Business Analyst",
+          "startDate": "2021-06",
+          "endDate": "2023-01",
+          "userStatedFacts": ["monthly reports", "sales data analysis"],
+          "userStatedSkills": ["basic SQL", "Excel"]
+        },
+        "jdKeywords": ["SQL", "Excel", "reporting"]
+      },
+      "expected_output": {
+        "verdict": "failed",
+        "checks": {
+          "CHECK_9_QUALIFIER_RULE": "failed"
+        }
+      },
+      "validation_rules": [
+        "verdict === 'failed'",
+        "checks.CHECK_9_QUALIFIER_RULE === 'failed'",
+        "failureReasons.length >= 1",
+        "failureReasons[0].check === 'CHECK_9_QUALIFIER_RULE'"
+      ]
+    },
+    {
+      "id": "tc-003",
+      "description": "Em dash and forbidden buzzword violations",
+      "input": {
+        "bullet": "Spearheaded cloud migration — reduced infrastructure costs by 40%.",
+        "sourceEvidence": {
+          "company": "Tech Co",
+          "title": "DevOps Engineer",
+          "startDate": "2020-03",
+          "endDate": "2022-11",
+          "userStatedFacts": ["cloud migration", "40% cost reduction"],
+          "userStatedSkills": ["AWS", "Terraform", "Docker"]
+        },
+        "jdKeywords": ["cloud", "AWS", "Terraform"]
+      },
+      "expected_output": {
+        "verdict": "failed",
+        "checks": {
+          "CHECK_6_NO_EM_DASHES": "failed",
+          "CHECK_8_NO_FORBIDDEN_BUZZWORDS": "failed"
+        }
+      },
+      "validation_rules": [
+        "verdict === 'failed'",
+        "checks.CHECK_6_NO_EM_DASHES === 'failed'",
+        "checks.CHECK_8_NO_FORBIDDEN_BUZZWORDS === 'failed'",
+        "failureReasons.length === 2"
+      ]
+    },
+    {
+      "id": "tc-004",
+      "description": "Fabricated skill — Kubernetes not mentioned by user",
+      "input": {
+        "bullet": "Deployed containerized services using Docker and Kubernetes on AWS.",
+        "sourceEvidence": {
+          "company": "Startup LLC",
+          "title": "Software Engineer",
+          "startDate": "2023-01",
+          "userStatedFacts": ["containerized services", "Docker deployment"],
+          "userStatedSkills": ["Docker", "AWS"]
+        },
+        "jdKeywords": ["Docker", "Kubernetes", "AWS"]
+      },
+      "expected_output": {
+        "verdict": "failed",
+        "checks": {
+          "CHECK_2_NO_FABRICATED_SKILLS": "failed"
+        }
+      },
+      "validation_rules": [
+        "verdict === 'failed'",
+        "checks.CHECK_2_NO_FABRICATED_SKILLS === 'failed'",
+        "failureReasons[0].check === 'CHECK_2_NO_FABRICATED_SKILLS'",
+        "failureReasons[0].suggestedFix includes 'Kubernetes'"
+      ]
+    },
+    {
+      "id": "tc-005",
+      "description": "Metric inflation — user said 15% but bullet says 30%",
+      "input": {
+        "bullet": "Reduced customer churn by 30% through targeted email campaigns.",
+        "sourceEvidence": {
+          "company": "SaaS Co",
+          "title": "Growth Marketing Manager",
+          "startDate": "2021-04",
+          "endDate": "2023-06",
+          "userStatedFacts": ["reduced churn by 15%", "email campaigns"],
+          "userStatedSkills": ["email marketing", "HubSpot", "Salesforce"]
+        },
+        "jdKeywords": ["retention", "email", "campaigns"]
+      },
+      "expected_output": {
+        "verdict": "failed",
+        "checks": {
+          "CHECK_4_METRICS_MATCH": "failed"
+        }
+      },
+      "validation_rules": [
+        "verdict === 'failed'",
+        "checks.CHECK_4_METRICS_MATCH === 'failed'",
+        "failureReasons[0].reason includes '30%' or '15%'"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,287 @@
+{
+  "id": "test-career-memory-id",
+  "userId": "test-user-id",
+  "version": 1,
+  "jobs": [
+    {
+      "id": "job-stripe",
+      "company": "Stripe",
+      "title": "Senior Product Manager",
+      "startDate": "2021-03-01",
+      "endDate": null,
+      "current": true,
+      "location": "San Francisco, CA",
+      "employmentType": "Full-Time",
+      "sourceType": "UPLOADED",
+      "verified": false,
+      "locked": false,
+      "sortOrder": 0,
+      "bullets": [
+        {
+          "id": "bullet-stripe-1",
+          "content": "Led the redesign of the Stripe Dashboard onboarding flow, reducing time-to-first-charge from 4.2 days to 1.8 days for new merchants",
+          "contentType": "VERIFIED",
+          "metrics": ["4.2 days", "1.8 days"],
+          "keywords": ["onboarding", "product redesign", "merchant"],
+          "locked": false,
+          "usedInResumeCount": 0
+        },
+        {
+          "id": "bullet-stripe-2",
+          "content": "Managed a cross-functional team of 8 engineers, 2 designers, and 1 data analyst across three time zones",
+          "contentType": "VERIFIED",
+          "metrics": ["8 engineers", "2 designers", "1 data analyst"],
+          "keywords": ["cross-functional", "team management"],
+          "locked": false,
+          "usedInResumeCount": 0
+        },
+        {
+          "id": "bullet-stripe-3",
+          "content": "Defined and owned the OKR framework for the Merchant Growth squad, tracking 12 KPIs across 3 product lines",
+          "contentType": "VERIFIED",
+          "metrics": ["12 KPIs", "3 product lines"],
+          "keywords": ["OKR", "KPI", "growth"],
+          "locked": false,
+          "usedInResumeCount": 0
+        },
+        {
+          "id": "bullet-stripe-4",
+          "content": "Launched Stripe Tax in 4 new markets (Canada, Australia, Germany, France), generating $2M in incremental ARR within 6 months",
+          "contentType": "VERIFIED",
+          "metrics": ["4 markets", "$2M", "6 months"],
+          "keywords": ["launch", "international expansion", "ARR"],
+          "locked": false,
+          "usedInResumeCount": 0
+        },
+        {
+          "id": "bullet-stripe-5",
+          "content": "Collaborated with Sales and Customer Success to reduce merchant churn by 18% through proactive feature adoption campaigns",
+          "contentType": "VERIFIED",
+          "metrics": ["18%"],
+          "keywords": ["churn reduction", "retention", "cross-functional"],
+          "locked": false,
+          "usedInResumeCount": 0
+        }
+      ]
+    },
+    {
+      "id": "job-airbnb",
+      "company": "Airbnb",
+      "title": "Product Manager",
+      "startDate": "2018-07-01",
+      "endDate": "2021-02-28",
+      "current": false,
+      "location": "San Francisco, CA",
+      "employmentType": "Full-Time",
+      "sourceType": "UPLOADED",
+      "verified": false,
+      "locked": false,
+      "sortOrder": 1,
+      "bullets": [
+        {
+          "id": "bullet-airbnb-1",
+          "content": "Owned the Host Tools product area, serving 4 million active hosts globally",
+          "contentType": "VERIFIED",
+          "metrics": ["4 million active hosts"],
+          "keywords": ["product ownership", "scale", "global"],
+          "locked": false,
+          "usedInResumeCount": 0
+        },
+        {
+          "id": "bullet-airbnb-2",
+          "content": "Shipped the Smart Pricing 2.0 feature, which increased host revenue by an average of 12% per booking",
+          "contentType": "VERIFIED",
+          "metrics": ["12%"],
+          "keywords": ["pricing", "revenue growth", "feature launch"],
+          "locked": false,
+          "usedInResumeCount": 0
+        },
+        {
+          "id": "bullet-airbnb-3",
+          "content": "Ran 40+ A/B experiments per quarter using internal experimentation platform; maintained a 34% win rate",
+          "contentType": "VERIFIED",
+          "metrics": ["40+", "34%"],
+          "keywords": ["A/B testing", "experimentation", "data-driven"],
+          "locked": false,
+          "usedInResumeCount": 0
+        },
+        {
+          "id": "bullet-airbnb-4",
+          "content": "Partnered with Data Science to build a host health score model that identified at-risk hosts 30 days earlier than previous heuristics",
+          "contentType": "VERIFIED",
+          "metrics": ["30 days"],
+          "keywords": ["data science", "predictive modeling", "retention"],
+          "locked": false,
+          "usedInResumeCount": 0
+        },
+        {
+          "id": "bullet-airbnb-5",
+          "content": "Wrote PRDs, launch plans, and stakeholder readouts for executive review; presented quarterly to VP and CPO",
+          "contentType": "VERIFIED",
+          "metrics": [],
+          "keywords": ["PRD", "executive communication", "stakeholder management"],
+          "locked": false,
+          "usedInResumeCount": 0
+        }
+      ]
+    },
+    {
+      "id": "job-intuit",
+      "company": "Intuit",
+      "title": "Associate Product Manager",
+      "startDate": "2016-08-01",
+      "endDate": "2018-06-30",
+      "current": false,
+      "location": "Mountain View, CA",
+      "employmentType": "Full-Time",
+      "sourceType": "UPLOADED",
+      "verified": false,
+      "locked": false,
+      "sortOrder": 2,
+      "bullets": [
+        {
+          "id": "bullet-intuit-1",
+          "content": "Rotated across QuickBooks Online, TurboTax, and Mint over 24 months in the APM Program",
+          "contentType": "VERIFIED",
+          "metrics": ["24 months"],
+          "keywords": ["rotational program", "APM"],
+          "locked": false,
+          "usedInResumeCount": 0
+        },
+        {
+          "id": "bullet-intuit-2",
+          "content": "Reduced QuickBooks invoice creation time by 22% through a simplified UX flow",
+          "contentType": "VERIFIED",
+          "metrics": ["22%"],
+          "keywords": ["UX", "product improvement", "QuickBooks"],
+          "locked": false,
+          "usedInResumeCount": 0
+        },
+        {
+          "id": "bullet-intuit-3",
+          "content": "Built the business case for Mint's bill negotiation feature, which reached 250K users in first 6 months",
+          "contentType": "VERIFIED",
+          "metrics": ["250K users", "6 months"],
+          "keywords": ["business case", "feature adoption"],
+          "locked": false,
+          "usedInResumeCount": 0
+        },
+        {
+          "id": "bullet-intuit-4",
+          "content": "Facilitated weekly sprint ceremonies and maintained the product backlog for a 6-person engineering squad",
+          "contentType": "VERIFIED",
+          "metrics": ["6-person engineering squad"],
+          "keywords": ["agile", "sprint", "backlog management"],
+          "locked": false,
+          "usedInResumeCount": 0
+        }
+      ]
+    }
+  ],
+  "education": [
+    {
+      "id": "edu-stanford",
+      "degree": "Master of Science, Management Science and Engineering",
+      "institution": "Stanford University",
+      "graduationDate": "2016-06-01",
+      "expectedDate": null,
+      "inProgress": false,
+      "gpa": null,
+      "location": "Stanford, CA",
+      "verified": false
+    },
+    {
+      "id": "edu-michigan",
+      "degree": "Bachelor of Science, Computer Science",
+      "institution": "University of Michigan",
+      "graduationDate": "2014-05-01",
+      "expectedDate": null,
+      "inProgress": false,
+      "gpa": "3.7 / 4.0",
+      "location": "Ann Arbor, MI",
+      "verified": false
+    }
+  ],
+  "skills": [
+    {
+      "id": "skill-sql",
+      "name": "SQL",
+      "category": "Data Analysis",
+      "proficiencyLabel": "basic",
+      "verified": false
+    },
+    {
+      "id": "skill-amplitude",
+      "name": "Amplitude",
+      "category": "Analytics",
+      "proficiencyLabel": "some experience",
+      "verified": false
+    },
+    {
+      "id": "skill-mixpanel",
+      "name": "Mixpanel",
+      "category": "Analytics",
+      "proficiencyLabel": null,
+      "verified": false
+    },
+    {
+      "id": "skill-tableau",
+      "name": "Tableau",
+      "category": "Data Visualization",
+      "proficiencyLabel": null,
+      "verified": false
+    },
+    {
+      "id": "skill-figma",
+      "name": "Figma",
+      "category": "Design Tools",
+      "proficiencyLabel": null,
+      "verified": false
+    },
+    {
+      "id": "skill-abtesting",
+      "name": "A/B testing",
+      "category": "Experimentation",
+      "proficiencyLabel": null,
+      "verified": false
+    },
+    {
+      "id": "skill-jira",
+      "name": "Jira",
+      "category": "Project Management",
+      "proficiencyLabel": null,
+      "verified": false
+    },
+    {
+      "id": "skill-okr",
+      "name": "OKR frameworks",
+      "category": "Strategy",
+      "proficiencyLabel": null,
+      "verified": false
+    }
+  ],
+  "certifications": [
+    {
+      "id": "cert-cspo",
+      "name": "Certified Scrum Product Owner (CSPO)",
+      "issuingBody": "Scrum Alliance",
+      "issueDate": "2019-01-01",
+      "expiryDate": null,
+      "credentialId": null,
+      "verified": false
+    },
+    {
+      "id": "cert-aws",
+      "name": "AWS Certified Cloud Practitioner",
+      "issuingBody": "Amazon Web Services",
+      "issueDate": "2022-01-01",
+      "expiryDate": null,
+      "credentialId": null,
+      "verified": false
+    }
+  ],
+  "projects": [],
+  "achievements": [],
+  "createdAt": "2025-05-20T00:00:00.000Z",
+  "updatedAt": "2025-05-20T00:00:00.000Z"
+}

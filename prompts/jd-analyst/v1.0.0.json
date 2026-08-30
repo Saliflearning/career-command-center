@@ -1,0 +1,121 @@
+{
+  "version": "1.0.0",
+  "agent": "jd-analyst",
+  "description": "Analyzes a job description to extract the top 5 required skills, tone, keywords, priority sections, and role type. Output is used by the Strategy agent to build a tailored resume structure.",
+  "tier": "tier2",
+  "token_budget": {
+    "max_input_tokens": 2000,
+    "max_output_tokens": 512,
+    "note": "JD text is truncated to 2000 tokens (~8000 chars) before sending. Output is compact JSON."
+  },
+  "cache_policy": {
+    "ttl_hours": 24,
+    "cache_key": "sha256(jdText)",
+    "note": "Never re-run JD Analyst on the same JD text within 24 hours."
+  },
+  "input_schema": {
+    "type": "object",
+    "required": ["jdText"],
+    "properties": {
+      "jdText": {
+        "type": "string",
+        "description": "Full text of the job description. Will be truncated to 2000 tokens if longer.",
+        "maxLength": 8000
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object",
+    "required": ["topSkills", "tone", "keywords", "prioritySections", "roleType"],
+    "properties": {
+      "topSkills": {
+        "type": "array",
+        "items": { "type": "string" },
+        "minItems": 5,
+        "maxItems": 5,
+        "description": "Exactly 5 required skills extracted from the JD, most important first."
+      },
+      "tone": {
+        "type": "string",
+        "enum": ["formal", "startup", "corporate", "government"],
+        "description": "Overall tone of the job description."
+      },
+      "keywords": {
+        "type": "array",
+        "items": { "type": "string" },
+        "minItems": 8,
+        "maxItems": 15,
+        "description": "Keywords that should appear naturally in the resume."
+      },
+      "prioritySections": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Resume sections ordered by importance for this specific role."
+      },
+      "roleType": {
+        "type": "string",
+        "enum": ["TECHNICAL", "OPERATIONS", "BUSINESS", "DATA", "FINANCE", "ACADEMIC", "FEDERAL", "CREATIVE"],
+        "description": "Broad role category used for section-order decisions in the Strategy agent."
+      }
+    }
+  },
+  "system_prompt": "You are the JD Analyst for Career Command Center.\n\nYour job is to analyze a job description and return a structured JSON object.\nYou MUST return ONLY valid JSON — no markdown, no explanation, no preamble.\n\nOutput schema:\n{\n  \"topSkills\": string[],        // exactly 5 required skills, most important first\n  \"tone\": \"formal\" | \"startup\" | \"corporate\" | \"government\",\n  \"keywords\": string[],         // 8–15 keywords that should appear in the resume\n  \"prioritySections\": string[], // ordered list of resume sections most relevant to this role\n  \"roleType\": \"TECHNICAL\" | \"OPERATIONS\" | \"BUSINESS\" | \"DATA\" | \"FINANCE\" | \"ACADEMIC\" | \"FEDERAL\" | \"CREATIVE\"\n}\n\nRules:\n1. topSkills must contain exactly 5 items — use the most explicitly required skills.\n2. keywords must be terms that appear in or are strongly implied by the JD.\n3. prioritySections should be ordered by importance to this specific role.\n4. roleType must be the single best fit — pick one.\n5. tone: \"government\" if the role is public sector/federal; \"formal\" if corporate finance/law;\n   \"startup\" if the language is casual/fast-moving; \"corporate\" for enterprise/B2B defaults.\n6. Return ONLY the JSON object. Any extra text will cause a parse failure.",
+  "forbidden_patterns": [
+    "Do not add skills not mentioned in the JD",
+    "Do not upgrade skill qualifiers",
+    "Do not fabricate company names or role details",
+    "Do not return markdown or explanation text alongside the JSON"
+  ],
+  "test_cases": [
+    {
+      "id": "tc-001",
+      "description": "Software engineering JD — should return TECHNICAL role type",
+      "input": {
+        "jdText": "We are looking for a Senior Software Engineer with 5+ years of experience in Python, React, and AWS. You will design and build scalable microservices, collaborate with product teams, and mentor junior engineers. Required: strong experience with Docker, Kubernetes, and CI/CD pipelines. Nice to have: GraphQL, TypeScript."
+      },
+      "expected_output": {
+        "roleType": "TECHNICAL",
+        "tone": "startup",
+        "topSkills": ["Python", "React", "AWS", "Docker", "Kubernetes"]
+      },
+      "validation_rules": [
+        "topSkills.length === 5",
+        "roleType === 'TECHNICAL'",
+        "keywords includes at least 'Python', 'AWS', 'Docker'",
+        "prioritySections[0] includes 'Technical Skills' or 'Summary'"
+      ]
+    },
+    {
+      "id": "tc-002",
+      "description": "Federal government analyst role — should return FEDERAL role type and government tone",
+      "input": {
+        "jdText": "The Department of Defense seeks a Program Analyst (GS-12). Duties include monitoring program execution, preparing briefings for senior leadership, managing contractor deliverables, and ensuring compliance with FAR/DFARS regulations. Security clearance required. U.S. citizenship required. This position is open to current federal employees and veterans preference eligibles."
+      },
+      "expected_output": {
+        "roleType": "FEDERAL",
+        "tone": "government"
+      },
+      "validation_rules": [
+        "roleType === 'FEDERAL'",
+        "tone === 'government'",
+        "keywords includes at least one of 'FAR', 'DFARS', 'security clearance', 'GS-12'"
+      ]
+    },
+    {
+      "id": "tc-003",
+      "description": "Data analyst JD — should return DATA role type",
+      "input": {
+        "jdText": "Join our analytics team as a Data Analyst. You will write SQL queries to extract insights, build dashboards in Tableau and Power BI, and present findings to stakeholders. Python scripting for data pipelines is a plus. Strong Excel skills required."
+      },
+      "expected_output": {
+        "roleType": "DATA",
+        "topSkills": ["SQL", "Tableau", "Power BI", "Python", "Excel"]
+      },
+      "validation_rules": [
+        "roleType === 'DATA'",
+        "topSkills.length === 5",
+        "keywords includes 'SQL'"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,197 @@
+{
+  "version": "1.0.0",
+  "agent": "strategy",
+  "description": "Generates a complete resume strategy: section order, emphasis points, keyword match status, and gap analysis. Requires BOTH normalizer output AND JD analysis before calling. Uses tier3 (best model) because this decision shapes the entire resume.",
+  "tier": "tier3",
+  "token_budget": {
+    "max_input_tokens": 4000,
+    "max_output_tokens": 800,
+    "note": "Career profile and JD analysis are the primary inputs. Output is compact strategy JSON."
+  },
+  "preconditions": [
+    "Normalizer output must be fully resolved (ResumeState >= NORMALIZED)",
+    "JD analysis must be fully resolved (JDAnalysis object available)",
+    "Do NOT call before both conditions are met — orchestrator is responsible for gating"
+  ],
+  "input_schema": {
+    "type": "object",
+    "required": ["careerProfile", "jdAnalysis"],
+    "properties": {
+      "careerProfile": {
+        "type": "object",
+        "description": "Full normalizer output for the user's career profile (structured JSON)."
+      },
+      "jdAnalysis": {
+        "type": "object",
+        "description": "Output of the JD Analyst agent.",
+        "required": ["topSkills", "tone", "keywords", "prioritySections", "roleType"],
+        "properties": {
+          "topSkills": { "type": "array", "items": { "type": "string" } },
+          "tone": { "type": "string", "enum": ["formal", "startup", "corporate", "government"] },
+          "keywords": { "type": "array", "items": { "type": "string" } },
+          "prioritySections": { "type": "array", "items": { "type": "string" } },
+          "roleType": {
+            "type": "string",
+            "enum": ["TECHNICAL", "OPERATIONS", "BUSINESS", "DATA", "FINANCE", "ACADEMIC", "FEDERAL", "CREATIVE"]
+          }
+        }
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object",
+    "required": ["sectionOrder", "emphasisPoints", "keywordsMatched", "keywordsPresent", "gaps", "structureRationale", "roleType"],
+    "properties": {
+      "sectionOrder": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Ordered list of resume sections for this role type."
+      },
+      "emphasisPoints": {
+        "type": "array",
+        "items": { "type": "string" },
+        "minItems": 3,
+        "maxItems": 3,
+        "description": "Exactly 3 experience highlights to lead with. Must come from verified career profile data."
+      },
+      "keywordsMatched": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "JD keywords found in the career profile. Display as green chips in Strategy Briefing screen."
+      },
+      "keywordsPresent": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Profile keywords not yet surfaced in context of this JD. Display as gray chips."
+      },
+      "gaps": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "JD keywords NOT found in profile. INFORMATIONAL ONLY — never fabricated into resume content."
+      },
+      "structureRationale": {
+        "type": "string",
+        "maxLength": 150,
+        "description": "One sentence (max 20 words) explaining the section order decision."
+      },
+      "roleType": {
+        "type": "string",
+        "enum": ["TECHNICAL", "OPERATIONS", "BUSINESS", "DATA", "FINANCE", "ACADEMIC", "FEDERAL", "CREATIVE"],
+        "description": "Role type carried forward from JD analysis."
+      }
+    }
+  },
+  "system_prompt": "You are the Resume Strategy agent for Career Command Center.\n\nYou receive two inputs:\n1. A user's normalized career profile (structured JSON)\n2. A JD analysis (structured JSON with topSkills, tone, keywords, roleType)\n\nYour job is to produce a resume strategy as a structured JSON object.\nReturn ONLY valid JSON — no markdown, no explanation, no preamble.\n\nOutput schema:\n{\n  \"sectionOrder\": string[],       // ordered resume sections for this role type\n  \"emphasisPoints\": string[],     // exactly 3 experience highlights to lead with\n  \"keywordsMatched\": string[],    // JD keywords found in the user's career profile\n  \"keywordsPresent\": string[],    // profile keywords not yet surfaced (gray)\n  \"gaps\": string[],               // JD keywords NOT in profile — informational only\n  \"structureRationale\": string,   // one sentence explaining the section order decision\n  \"roleType\": string              // carry forward from JD analysis\n}\n\nABSOLUTE RULES — violating these is a critical failure:\n1. NEVER add skills, tools, or qualifiers to the resume that the user has not mentioned.\n2. NEVER upgrade a user's self-assessed skill level (e.g. \"basic SQL\" stays \"basic SQL\").\n3. gaps is INFORMATIONAL ONLY — it tells the user what is missing. Do not suggest fabricating it.\n4. emphasisPoints must come from verified career profile data — not invented.\n5. keywordsMatched must only list keywords that genuinely appear in the career profile.\n6. sectionOrder must follow the role-type section order rules defined below.\n7. structureRationale must be a single sentence (no more than 20 words).\n8. Return ONLY the JSON object. Any extra text causes a parse failure.\n\nQUALIFIER RULE (critical):\nIf the user's profile includes a qualifier (\"basic\", \"exposure to\", \"some experience with\"), that qualifier MUST be preserved. Never suggest presenting a qualified skill as a full competency. The strategy must reflect actual demonstrated experience, not aspirational framing.\n\nSection order rules by roleType:\n- TECHNICAL:   Summary, Technical Skills, Experience, Projects, Education and Certs\n- OPERATIONS:  Summary, Core Skills, Experience, Education\n- BUSINESS:    Summary, Core Skills, Experience, Education\n- DATA:        Summary, Technical Skills, Experience, Projects, Education\n- FINANCE:     Summary, Experience, Education, Skills\n- ACADEMIC:    Summary, Education, Research Experience, Publications, Skills\n- FEDERAL:     Summary, Experience, Education, Skills, Certifications, Additional Information\n- CREATIVE:    Summary, Skills, Experience, Projects, Education\n\nSection order rationale examples:\n- TECHNICAL: \"Technical Skills section leads because recruiters scan for tool stack before reading experience.\"\n- FINANCE: \"Experience leads because finance roles weight tenure and employer prestige above skills lists.\"\n- ACADEMIC: \"Education leads because academic roles evaluate credentials and research output first.\"",
+  "forbidden_patterns": [
+    "Do not suggest adding skills the user has not mentioned",
+    "Do not upgrade skill qualifiers from the career profile",
+    "Do not invent emphasisPoints not present in the career profile",
+    "Do not list fabricated keywords in keywordsMatched",
+    "Do not return markdown or explanation text alongside the JSON",
+    "Do not produce more than 3 emphasisPoints",
+    "Do not make structureRationale longer than one sentence"
+  ],
+  "test_cases": [
+    {
+      "id": "tc-001",
+      "description": "TECHNICAL role — section order must lead with Technical Skills",
+      "input": {
+        "jdAnalysis": {
+          "roleType": "TECHNICAL",
+          "topSkills": ["Python", "AWS", "Docker", "Kubernetes", "React"],
+          "tone": "startup",
+          "keywords": ["Python", "AWS", "Docker", "Kubernetes", "React", "CI/CD", "microservices"],
+          "prioritySections": ["Technical Skills", "Experience", "Projects"]
+        },
+        "careerProfile": {
+          "skills": ["Python", "Docker", "AWS", "JavaScript"],
+          "jobs": [
+            {
+              "title": "Software Engineer",
+              "company": "Acme Corp",
+              "bullets": ["Built Python microservices serving 50K daily users", "Deployed on AWS ECS using Docker containers"]
+            }
+          ]
+        }
+      },
+      "expected_output": {
+        "roleType": "TECHNICAL",
+        "sectionOrder": ["Summary", "Technical Skills", "Experience", "Projects", "Education and Certs"]
+      },
+      "validation_rules": [
+        "sectionOrder[0] === 'Summary'",
+        "sectionOrder[1] === 'Technical Skills'",
+        "emphasisPoints.length === 3",
+        "keywordsMatched includes 'Python'",
+        "gaps does not include 'Python'",
+        "typeof structureRationale === 'string'"
+      ]
+    },
+    {
+      "id": "tc-002",
+      "description": "Qualifier rule — basic SQL must not appear in keywordsMatched as plain SQL",
+      "input": {
+        "jdAnalysis": {
+          "roleType": "DATA",
+          "topSkills": ["SQL", "Python", "Tableau", "Power BI", "Excel"],
+          "tone": "corporate",
+          "keywords": ["SQL", "Python", "Tableau", "data pipeline", "reporting"],
+          "prioritySections": ["Technical Skills", "Experience", "Projects"]
+        },
+        "careerProfile": {
+          "skills": ["basic SQL", "Excel", "PowerPoint"],
+          "jobs": [
+            {
+              "title": "Business Analyst",
+              "company": "Corp Inc",
+              "bullets": ["Produced Excel-based reports for finance team", "Used basic SQL queries for ad-hoc data pulls"]
+            }
+          ]
+        }
+      },
+      "expected_output": {
+        "roleType": "DATA"
+      },
+      "validation_rules": [
+        "keywordsMatched does not include unqualified 'SQL' if profile only has 'basic SQL'",
+        "emphasisPoints.length === 3",
+        "gaps includes 'Python' or 'Tableau' since they are not in career profile"
+      ]
+    },
+    {
+      "id": "tc-003",
+      "description": "FINANCE role — Experience section must lead after Summary",
+      "input": {
+        "jdAnalysis": {
+          "roleType": "FINANCE",
+          "topSkills": ["Financial Modeling", "Excel", "Valuation", "M&A", "Bloomberg"],
+          "tone": "formal",
+          "keywords": ["financial modeling", "DCF", "valuation", "Excel", "Bloomberg"],
+          "prioritySections": ["Experience", "Education", "Skills"]
+        },
+        "careerProfile": {
+          "education": [{ "degree": "MBA", "school": "Wharton", "year": "2022" }],
+          "jobs": [
+            {
+              "title": "Financial Analyst",
+              "company": "Goldman Sachs",
+              "bullets": ["Built DCF models for M&A transactions totaling $2B", "Managed Bloomberg terminal workflows for equity research"]
+            }
+          ],
+          "skills": ["Excel", "Bloomberg", "Financial Modeling", "PowerPoint"]
+        }
+      },
+      "expected_output": {
+        "roleType": "FINANCE",
+        "sectionOrder": ["Summary", "Experience", "Education", "Skills"]
+      },
+      "validation_rules": [
+        "sectionOrder[0] === 'Summary'",
+        "sectionOrder[1] === 'Experience'",
+        "keywordsMatched includes 'Excel'",
+        "keywordsMatched includes 'Bloomberg'",
+        "emphasisPoints.length === 3"
+      ]
+    }
+  ]
+}

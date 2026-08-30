@@ -1,0 +1,267 @@
+{
+  "version": "1.0.0",
+  "description": "Bullet-writer prompt: generates strong, rule-compliant resume bullets from work history source data.",
+  "agent": "bullet-writer",
+  "tier": "tier3",
+  "max_output_tokens": 500,
+
+  "input_schema": {
+    "type": "object",
+    "required": ["company", "title", "startDate", "current", "bullets"],
+    "properties": {
+      "company": {
+        "type": "string",
+        "description": "Employer name"
+      },
+      "title": {
+        "type": "string",
+        "description": "Job title at this employer"
+      },
+      "startDate": {
+        "type": "string",
+        "format": "YYYY-MM",
+        "description": "Role start date in ISO 8601 short form"
+      },
+      "endDate": {
+        "type": ["string", "null"],
+        "format": "YYYY-MM",
+        "description": "Role end date; null if current"
+      },
+      "current": {
+        "type": "boolean",
+        "description": "True if this is the candidate's current role"
+      },
+      "location": {
+        "type": ["string", "null"]
+      },
+      "employmentType": {
+        "type": ["string", "null"],
+        "examples": ["full-time", "contract", "part-time", "internship"]
+      },
+      "bullets": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Original resume bullets to rewrite; may be empty"
+      },
+      "targetRole": {
+        "type": ["string", "null"],
+        "description": "Target job title being applied for"
+      },
+      "targetCompany": {
+        "type": ["string", "null"]
+      },
+      "jdKeywords": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Keywords extracted from the target job description"
+      }
+    }
+  },
+
+  "output_schema": {
+    "type": "object",
+    "required": [
+      "bullets",
+      "metrics_used",
+      "keywords_matched",
+      "forbidden_words_check",
+      "qualifier_rule_check",
+      "confidence",
+      "warnings"
+    ],
+    "properties": {
+      "bullets": {
+        "type": "array",
+        "minItems": 3,
+        "maxItems": 6,
+        "items": {
+          "type": "string",
+          "description": "Single resume bullet starting with a strong action verb"
+        }
+      },
+      "metrics_used": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Quantitative metrics included in the bullets (%, $, count, etc.)"
+      },
+      "keywords_matched": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "JD keywords that appear in the generated bullets"
+      },
+      "forbidden_words_check": {
+        "type": "string",
+        "enum": ["passed", "failed"],
+        "description": "passed if no forbidden words appear in any bullet"
+      },
+      "qualifier_rule_check": {
+        "type": "string",
+        "enum": ["passed", "failed"],
+        "description": "passed if no skill qualifiers were upgraded beyond source data"
+      },
+      "confidence": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1,
+        "description": "Model confidence that all writing rules are satisfied"
+      },
+      "warnings": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Any caveats: missing metrics, ambiguous dates, rule violations detected"
+      }
+    }
+  },
+
+  "forbidden_patterns": {
+    "words": [
+      "leveraged",
+      "spearheaded",
+      "synergized",
+      "dynamic",
+      "results-driven",
+      "passionate",
+      "detail-oriented",
+      "innovative",
+      "strategic thinker",
+      "responsible for"
+    ],
+    "characters": ["—"],
+    "constructs": [
+      "first_person_pronouns: I, my, me, we, our",
+      "passive_voice: was <verb>ed, were <verb>ed, is <verb>ed, are <verb>ed, been <verb>ed"
+    ],
+    "qualifier_upgrades": {
+      "description": "Never upgrade self-assessed skill level",
+      "forbidden_upgrades": [
+        "familiar → proficient",
+        "familiar → expert",
+        "beginner → proficient",
+        "beginner → expert",
+        "basic → advanced",
+        "basic → expert"
+      ]
+    }
+  },
+
+  "writing_rules": {
+    "verb_tense": "past tense for previous roles; present tense only for current role",
+    "bullet_count": "3 to 6 per role",
+    "bullet_length": "1 to 2 lines maximum (approximately 120 characters per line)",
+    "quantification": "include numbers, percentages, dollar amounts, or time saved wherever source data supports it",
+    "structure": "action verb → context → outcome (with metric)"
+  },
+
+  "test_cases": [
+    {
+      "id": "tc-001",
+      "description": "Standard software engineering role with metrics",
+      "input": {
+        "company": "Acme Corp",
+        "title": "Software Engineer",
+        "startDate": "2021-06",
+        "endDate": "2023-08",
+        "current": false,
+        "location": "Remote",
+        "employmentType": "full-time",
+        "bullets": [
+          "Responsible for backend API development",
+          "Worked on CI/CD pipelines",
+          "Helped reduce system latency"
+        ],
+        "targetRole": "Senior Software Engineer",
+        "targetCompany": null,
+        "jdKeywords": ["Python", "REST API", "CI/CD", "AWS"]
+      },
+      "expected_output_criteria": {
+        "bullet_count_range": [3, 6],
+        "forbidden_words_check": "passed",
+        "qualifier_rule_check": "passed",
+        "must_start_with_verb": true,
+        "no_em_dashes": true,
+        "no_first_person": true,
+        "confidence_min": 0.8
+      }
+    },
+    {
+      "id": "tc-002",
+      "description": "Current role — bullets should use present tense",
+      "input": {
+        "company": "StartupXYZ",
+        "title": "Data Analyst",
+        "startDate": "2023-09",
+        "endDate": null,
+        "current": true,
+        "location": "New York, NY",
+        "employmentType": "full-time",
+        "bullets": [
+          "I am passionate about data visualization",
+          "Responsible for managing dashboards",
+          "Leveraged SQL to build reports"
+        ],
+        "targetRole": "Senior Data Analyst",
+        "targetCompany": null,
+        "jdKeywords": ["SQL", "Tableau", "Python", "dashboards"]
+      },
+      "expected_output_criteria": {
+        "bullet_count_range": [3, 6],
+        "forbidden_words_check": "passed",
+        "qualifier_rule_check": "passed",
+        "must_start_with_verb": true,
+        "no_em_dashes": true,
+        "no_first_person": true,
+        "tense": "present"
+      }
+    },
+    {
+      "id": "tc-003",
+      "description": "Qualifier rule — source says familiar, must not upgrade",
+      "input": {
+        "company": "Consulting Co",
+        "title": "Business Analyst",
+        "startDate": "2020-01",
+        "endDate": "2021-05",
+        "current": false,
+        "location": "Chicago, IL",
+        "employmentType": "contract",
+        "bullets": [
+          "Familiar with Python scripting for data tasks",
+          "Managed stakeholder communications"
+        ],
+        "targetRole": "Senior Business Analyst",
+        "targetCompany": null,
+        "jdKeywords": ["Python", "stakeholder management", "Excel"]
+      },
+      "expected_output_criteria": {
+        "qualifier_rule_check": "passed",
+        "must_not_upgrade_familiar_to": ["proficient", "expert", "advanced"],
+        "forbidden_words_check": "passed"
+      }
+    },
+    {
+      "id": "tc-004",
+      "description": "Forbidden words detector — input contains multiple forbidden words",
+      "input": {
+        "company": "Big Enterprise",
+        "title": "Project Manager",
+        "startDate": "2019-03",
+        "endDate": "2020-12",
+        "current": false,
+        "location": "San Francisco, CA",
+        "employmentType": "full-time",
+        "bullets": [
+          "Spearheaded a dynamic cross-functional initiative",
+          "Leveraged innovative strategies to synergize teams",
+          "Passionate and detail-oriented strategic thinker"
+        ],
+        "targetRole": "Senior Project Manager",
+        "targetCompany": null,
+        "jdKeywords": ["Agile", "Scrum", "stakeholder", "delivery"]
+      },
+      "expected_output_criteria": {
+        "forbidden_words_check": "passed",
+        "description": "All forbidden words from input must be rewritten out"
+      }
+    }
+  ]
+}
