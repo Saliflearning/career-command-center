@@ -1,4 +1,5 @@
 import express, { Request, Response } from "express";
+import { rateLimit } from "express-rate-limit";
 import { execFile } from "child_process";
 import { promisify } from "util";
 import { writeFile, readFile, rm, mkdir } from "fs/promises";
@@ -10,6 +11,17 @@ const execFileAsync = promisify(execFile);
 
 const app = express();
 app.use(express.json({ limit: "10mb" }));
+
+const renderLimiter = rateLimit({
+  windowMs: 60_000,
+  limit: 10,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  message: {
+    error: "Too many render requests. Try again shortly.",
+    stage: "rate-limit",
+  } satisfies ErrorResponse,
+});
 
 const PORT = 4000;
 
@@ -63,7 +75,7 @@ async function runXelatex(
   });
 }
 
-app.post("/render", async (req: Request, res: Response) => {
+app.post("/render", renderLimiter, async (req: Request, res: Response) => {
   const body = req.body as Partial<RenderRequest>;
 
   if (typeof body.latex !== "string" || body.latex.trim().length === 0) {

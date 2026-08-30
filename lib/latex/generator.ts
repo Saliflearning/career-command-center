@@ -29,26 +29,34 @@ import type {
  * Escape all LaTeX special characters in user-provided strings.
  * Must be applied to every string sourced from user data before insertion.
  */
-function esc(text: string | null | undefined): string {
+const LATEX_CHARACTER_ESCAPES: Readonly<Record<string, string>> = {
+  "\\": "\\textbackslash{}",
+  "&": "\\&",
+  "%": "\\%",
+  "$": "\\$",
+  "#": "\\#",
+  "_": "\\_",
+  "^": "\\^{}",
+  "{": "\\{",
+  "}": "\\}",
+  "~": "\\textasciitilde{}",
+  "—": "---",
+  "–": "--",
+  "”": "''",
+  "“": "``",
+  "’": "'",
+  "‘": "`",
+};
+
+export function escapeLatexText(text: string | null | undefined): string {
   if (!text) return "";
-  return text
-    .replace(/\\/g, "\\textbackslash{}")
-    .replace(/&/g,  "\\&")
-    .replace(/%/g,  "\\%")
-    .replace(/\$/g, "\\$")
-    .replace(/#/g,  "\\#")
-    .replace(/_/g,  "\\_")
-    .replace(/\^/g, "\\^{}")
-    .replace(/\{/g, "\\{")
-    .replace(/\}/g, "\\}")
-    .replace(/~/g,  "\\textasciitilde{}")
-    .replace(/—/g,  "---")   // em dash -> LaTeX em dash
-    .replace(/–/g,  "--")    // en dash
-    .replace(/”/g, "''")  // curly right double quote
-    .replace(/“/g, "``")  // curly left double quote
-    .replace(/’/g, "'")   // curly right single quote
-    .replace(/‘/g, "`");  // curly left single quote
+  return Array.from(
+    text,
+    (character) => LATEX_CHARACTER_ESCAPES[character] ?? character
+  ).join("");
 }
+
+const esc = escapeLatexText;
 
 // ---------------------------------------------------------------------------
 // Date formatting
