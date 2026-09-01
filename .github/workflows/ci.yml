@@ -38,6 +38,38 @@ jobs:
       - run: npm ci
       - run: npm test -- --runInBand --silent
 
+  migration-bootstrap:
+    name: Migration Bootstrap
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: career_command_center
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci -d career_command_center"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DATABASE_URL: postgresql://ci:ci@localhost:5432/career_command_center?schema=public
+      DIRECT_URL: postgresql://ci:ci@localhost:5432/career_command_center?schema=public
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci
+      - run: npm run db:verify:migrations
+      - run: npx prisma migrate deploy
+      - run: npm run db:verify:deployed
+      - run: npx prisma migrate diff --from-url "$DATABASE_URL" --to-schema-datamodel prisma/schema.prisma --exit-code
+
   quality:
     name: Lint, Types, Build, Audit
     runs-on: ubuntu-latest
