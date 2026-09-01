@@ -64,6 +64,11 @@ This makes failures observable and recoverable. Intermediate work is stored inst
 - Express-based XeLaTeX rendering worker
 - Vercel-compatible web deployment
 
+Operational recovery guides:
+
+- [Database recovery](docs/DATABASE_RECOVERY.md)
+- [Deployment recovery](docs/DEPLOYMENT_RECOVERY.md)
+
 ## Run locally
 
 Requirements: Node.js 24 or newer, npm, and PostgreSQL. The PDF path additionally requires Docker.
