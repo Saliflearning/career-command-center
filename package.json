@@ -16,6 +16,8 @@
     "test:e2e": "jest --selectProjects e2e",
     "test:coverage": "jest --coverage",
     "test:watch": "jest --watch",
+    "db:verify:migrations": "node scripts/verify-migration-history.mjs",
+    "db:verify:deployed": "node scripts/verify-migration-history.mjs --database",
     "safety:current": "node scripts/repository-safety.mjs --current",
     "safety:history": "node scripts/repository-safety.mjs --history",
     "safety:self-test": "node scripts/repository-safety.mjs --self-test",
