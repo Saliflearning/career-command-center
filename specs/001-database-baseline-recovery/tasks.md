@@ -22,13 +22,13 @@
 
 ## Phase 5 - User Story 3: Regression Prevention
 
-- [ ] T009 [US3] Run local static migration verification and repository safety gates
+- [x] T009 [US3] Run local static migration verification and repository safety gates
 - [x] T010 [US3] Run TypeScript, full Jest, lint, build, dependency audit, and diff checks
-- [ ] T011 [US3] Push the branch and require the real PostgreSQL 17 CI migration job to pass
+- [x] T011 [US3] Push the branch and require the real PostgreSQL 17 CI migration job to pass
 
 ## Phase 6 - Closure
 
-- [ ] T012 Record exact commit, CI run, and remaining production-reconciliation boundary in the public recovery documentation
+- [x] T012 Record exact commit, CI run, and remaining production-reconciliation boundary in the public recovery documentation
 
 ## Dependencies
 

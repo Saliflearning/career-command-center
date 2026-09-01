@@ -68,3 +68,9 @@ Never edit `_prisma_migrations` manually. Use Prisma's documented `migrate resol
 The application accesses model tables through server-side Prisma and applies user ownership checks in application routes. The baseline enables RLS as default-deny defense in depth, but intentionally creates no generic `anon` or `authenticated` grants or policies. Supabase Storage remains governed separately.
 
 Managed Supabase production reconciliation is an operational change, not part of ordinary application deployment. Record its backup, project identity, schema comparison, exact commands, and post-change verification in a private operational log.
+
+## Verification checkpoint
+
+Product commit `76fc4cbece41f415954075c596563e6a04ea3ecb` was verified in [GitHub Actions run 33469091195](https://github.com/Saliflearning/career-command-center/actions/runs/33469091195). The `Migration Bootstrap` job created an empty PostgreSQL 17 database, deployed `0_init` followed by `20260520_golden_path_sprint`, confirmed all 18 model tables had RLS enabled, and reported zero Prisma-supported schema drift.
+
+The same pull request also passed repository safety, 107 Jest suites with 924 tests, TypeScript, zero-warning ESLint, the 54-page production build, dependency review, dependency audit, and CodeQL. No production database reconciliation or DDL was performed.
