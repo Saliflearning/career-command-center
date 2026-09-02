@@ -262,7 +262,7 @@ CREATE TABLE "SystemConfig" (
     "value" TEXT NOT NULL,
     "iv" TEXT NOT NULL,
     "tag" TEXT NOT NULL,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
+    "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "SystemConfig_pkey" PRIMARY KEY ("key")
 );
