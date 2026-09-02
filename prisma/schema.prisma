@@ -260,7 +260,7 @@ model SystemConfig {
   value     String   // AES-256-GCM encrypted ciphertext (hex)
   iv        String   // 12-byte nonce (hex)
   tag       String   // 16-byte auth tag (hex)
-  updatedAt DateTime @updatedAt
+  updatedAt DateTime @default(now()) @updatedAt
 }
 
 enum SourceType {

@@ -56,6 +56,25 @@ function verifyStaticHistory() {
     }
   }
 
+  const systemConfigBlock = schema.match(
+    /model\s+SystemConfig\s+\{[\s\S]*?\n\}/,
+  )?.[0];
+  const systemConfigBaseline = baseline.match(
+    /CREATE TABLE "SystemConfig" \([\s\S]*?\n\);/,
+  )?.[0];
+  if (!systemConfigBlock?.includes("updatedAt DateTime @default(now()) @updatedAt")) {
+    failures.push(
+      "SystemConfig.updatedAt must retain its production default and Prisma update behavior.",
+    );
+  }
+  if (
+    !systemConfigBaseline?.includes(
+      '"updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,',
+    )
+  ) {
+    failures.push("Baseline must preserve the production SystemConfig.updatedAt default.");
+  }
+
   if (failures.length > 0) {
     fail(failures);
     return null;
