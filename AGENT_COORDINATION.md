@@ -23,7 +23,7 @@ wasn't one, let's use this file.
 
 | Date | Agent | Task | Files touched | Status |
 |---|---|---|---|---|
-| 2026-09-20 | Kai (agent 3) | P0-1: verify the career summary before persisting it | `agents/orchestrator/index.ts` (Step 5, ~L595-620) | Design spec complete; opening PR |
+| 2026-09-20 | Kai (agent 3) | P0-1: verify the career summary before persisting it | `agents/orchestrator/index.ts` (Step 5, ~L595-620) | PR #13 opened (kai/p01-verify-summary); awaiting review |
 
 ## Completed
 
