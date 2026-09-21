@@ -750,7 +750,11 @@ export async function runPipeline(resumeId: string): Promise<void> {
 
       // Targeted regeneration on a fixable failure — mirrors the bullet
       // pipeline's outer retry loop, capped at SUMMARY_MAX_REGENERATIONS.
-      if (!summaryVerifierResult.passed && summaryVerifierResult.retryInstructions) {
+      while (
+        !summaryVerifierResult.passed &&
+        summaryVerifierResult.retryInstructions &&
+        summaryRegenerations < SUMMARY_MAX_REGENERATIONS
+      ) {
         log("pipeline_summary_regen", resumeId, {
           failedRules: _failedSummaryRuleNumbers(summaryVerifierResult.checks),
           retryInstructions: summaryVerifierResult.retryInstructions,
