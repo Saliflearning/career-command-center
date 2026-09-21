@@ -582,7 +582,14 @@ describe("Orchestrator — happy path (UPLOADED → QA_REVIEWED)", () => {
     expect(mockRunStrategy).toHaveBeenCalledTimes(1);
     expect(mockRunSummaryWriter).toHaveBeenCalledTimes(1);
     expect(mockRunBulletWriter).toHaveBeenCalledTimes(1);
-    expect(mockRunVerifier).toHaveBeenCalledTimes(1);
+    // Verifier runs twice: Step 5 verifies the career summary, Step 6 the bullets
+    expect(mockRunVerifier).toHaveBeenCalledTimes(2);
+    const [summaryVerifierCtx] = (mockRunVerifier as jest.Mock).mock.calls[0];
+    const [bulletVerifierCtx] = (mockRunVerifier as jest.Mock).mock.calls[1];
+    expect(summaryVerifierCtx.bullets).toEqual([mockSummaryOutput.summaryText]);
+    expect(bulletVerifierCtx.bullets).toContain(
+      "Led activation initiative cutting time-to-first-charge by 40% across 2M merchants"
+    );
     expect(mockGenerateLatex).toHaveBeenCalledTimes(1);
   });
 
@@ -715,13 +722,59 @@ describe("Orchestrator — happy path (UPLOADED → QA_REVIEWED)", () => {
 
   it("passes bullet content strings to the verifier", async () => {
     await runPipeline(RESUME_ID);
-    const [verifierContext] = (mockRunVerifier as jest.Mock).mock.calls[0];
+    // calls[0] is the Step 5 summary verification; bullets are checked in calls[1]
+    const [verifierContext] = (mockRunVerifier as jest.Mock).mock.calls[1];
     expect(verifierContext.bullets).toContain(
       "Led activation initiative cutting time-to-first-charge by 40% across 2M merchants"
     );
     expect(verifierContext.sourceEvidence).toContain(
       "Led activation initiative reducing time-to-first-charge by 40%"
     );
+  });
+
+  it("verifies the career summary before persisting it", async () => {
+    await runPipeline(RESUME_ID);
+
+    // Step 5 runs the verifier on the summary before anything is persisted
+    const [summaryVerifierCtx] = (mockRunVerifier as jest.Mock).mock.calls[0];
+    expect(summaryVerifierCtx.bullets).toEqual([mockSummaryOutput.summaryText]);
+
+    const summaryUpdates = (mockDb.resume.update as jest.Mock).mock.calls.filter(
+      ([args]) => args?.data && "summaryVerificationJson" in args.data
+    );
+    expect(summaryUpdates).toHaveLength(1);
+    expect(summaryUpdates[0][0].data.summaryText).toBe(mockSummaryOutput.summaryText);
+    expect(summaryUpdates[0][0].data.summaryVerificationJson.passed).toBe(true);
+    expect(summaryUpdates[0][0].data.summaryVerificationJson.action).toBe("persist");
+  });
+
+  it("quarantines the summary on trust-critical verifier failure", async () => {
+    const failedChecks = {
+      ...makePassing().checks,
+      metricsMatchUserInput: {
+        rule: "Metrics match user input",
+        status: "failed",
+        detail: "40% appears in no source bullet",
+      },
+    };
+    (mockRunVerifier as jest.Mock)
+      .mockResolvedValueOnce({
+        ...makePassing(),
+        passed: false,
+        checks: failedChecks,
+        retryInstructions: null,
+        userMessage: "Summary failed verification",
+      })
+      .mockResolvedValue(makePassing()); // Step 6 bullet verification still passes
+
+    await runPipeline(RESUME_ID);
+
+    const summaryUpdates = (mockDb.resume.update as jest.Mock).mock.calls.filter(
+      ([args]) => args?.data && "summaryVerificationJson" in args.data
+    );
+    expect(summaryUpdates).toHaveLength(1);
+    expect(summaryUpdates[0][0].data.summaryText).toBeNull();
+    expect(summaryUpdates[0][0].data.summaryVerificationJson.action).toBe("quarantine");
   });
 
   it("derives verifier metrics from source text when metric metadata is empty", async () => {
@@ -732,7 +785,8 @@ describe("Orchestrator — happy path (UPLOADED → QA_REVIEWED)", () => {
 
     await runPipeline(RESUME_ID);
 
-    const [verifierContext] = (mockRunVerifier as jest.Mock).mock.calls[0];
+    // calls[0] is the Step 5 summary verification; bullets are checked in calls[1]
+    const [verifierContext] = (mockRunVerifier as jest.Mock).mock.calls[1];
     expect(verifierContext.userMetrics).toContain("40%");
   });
 
@@ -939,7 +993,7 @@ describe("Orchestrator — JDAnalysis + Strategy cache restore", () => {
     // Downstream agents still run
     expect(mockRunSummaryWriter).toHaveBeenCalledTimes(1);
     expect(mockRunBulletWriter).toHaveBeenCalledTimes(1);
-    expect(mockRunVerifier).toHaveBeenCalledTimes(1);
+    expect(mockRunVerifier).toHaveBeenCalledTimes(2); // summary + bullets
   });
 
   it("persists jdAnalysisJson to Resume after calling runJDAnalyst", async () => {
