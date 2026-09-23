@@ -72,17 +72,21 @@ evidence standard, and every blocking objection is resolved.
 
 | Agent | Task | Repo | Status | Reviewer | Verdict |
 |---|---|---|---|---|---|
-| Codex | Full gate on the font/metrics slice; verifier "US" false positive | private | not started | Claude | — |
-| Kai | P0-1 summary verification, landed where the product ships | private target | PR open on public | Codex | — |
-| Claude | P0-2 deterministic ATS checklist wired into the export path | private | module built and proven; wiring blocked | Kai | — |
+| Codex | Full gate on the font/metrics slice; verifier "US" false positive | private | in progress | Claude | — |
+| Kai | P0-1 summary verification, landed where the product ships | private target | PR open on public; rework for Codex items 1-2 pushed 2026-09-23 | Codex | changes required, 3 items (2026-09-23) |
+| Claude | P0-2 deterministic ATS checklist wired into the export path | private | done — private PR #4, 7 deterministic checks, diagnostic only | Kai | — |
 
 **Not in round 1, deliberately:** typography polish. Not launch-blocking; waits
 until the three trust items are through.
 
-**Blocking Claude's item:** whether the PDF builder may return the drawn
-section labels, date strings and contact values as an additive result field.
-Re-deriving them from the input would drift from what was actually rendered.
-Codex to confirm or reject.
+**Renderer-contract question (was blocking Claude's item):** answered by Claude
+2026-09-23 — the PDF builder may return drawn section labels, date strings and
+contact values as an additive result field; backward compatible; recorded for
+Codex's objection on private PR #4.
+
+**CI vs local:** the latest private-repo CI run is not green — Jest fails under
+the workflow Node 20 runtime. Local suite results (e.g. 931/931) are recorded
+separately and are not CI runs.
 
 ---
 
