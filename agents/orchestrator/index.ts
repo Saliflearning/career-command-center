@@ -64,15 +64,6 @@ import { runResumeVisualQualityGate } from "@/lib/resume/visual-quality-gate";
 const MAX_OUTER_RETRIES = 2;
 
 /**
- * P0-1: summary verification policy.
- *
- * Trust-critical verifier rules — a failure here means the summary may contain
- * a fabricated claim, so the text is quarantined (not persisted). Failures on
- * the remaining rules are quality defects: persist with a warning.
- */
-const SUMMARY_TRUST_RULE_NUMBERS = new Set([1, 2, 4, 5, 9]);
-
-/**
  * Maximum summary regenerations after a failed verification. Capped at 1 (not 2
  * like bullets) because the summary generator is tier2/expensive and there is
  * only one summary; the verifier's retryInstructions are specific enough for a
@@ -206,17 +197,27 @@ async function _buildVerifierContext(
 // spans the whole career, so userMetrics / sourceEvidence / userSkills are drawn
 // from every non-generated bullet in CareerMemory. CareerMemory already carries
 // bullet.metrics and contentType, so no DB round-trip is needed.
+//
+// Identity contract (Codex review 2026-09-23): the summary-specific
+// `allowedRoles` lists EVERY role/company/date range in the work history.
+// Rules 1 and 5 are judged against the full list — a truthful summary that
+// mentions an older role (e.g. Amazon) alongside the most recent one (e.g.
+// Resultant) must verify, not be quarantined as cross-job contamination.
 // ---------------------------------------------------------------------------
-function _buildSummaryVerifierContext(
+
+/** "2021-03-01" (ISO) → "2021-03"; null endDate → "present". */
+function _formatRoleDateRange(startDate: string, endDate: string | null): string {
+  const start = startDate ? new Date(startDate).toISOString().slice(0, 7) : "unknown";
+  const end = endDate ? new Date(endDate).toISOString().slice(0, 7) : "present";
+  return `${start} – ${end}`;
+}
+
+export function _buildSummaryVerifierContext(
   careerMemory: CareerMemory,
   jdText: string,
   summaryText: string
 ): VerifierContext {
   const mostRecent = careerMemory.jobs[0];
-  const start = mostRecent?.startDate ? new Date(mostRecent.startDate).toISOString().slice(0, 7) : "unknown";
-  const end = !mostRecent
-    ? "unknown"
-    : (mostRecent.endDate ? new Date(mostRecent.endDate).toISOString().slice(0, 7) : "present");
 
   // Career-wide ground truth: every bullet the user provided. GENERATED
   // rewrites are excluded — the verifier must judge against source data.
@@ -244,7 +245,13 @@ function _buildSummaryVerifierContext(
   return {
     jobTitle:       mostRecent?.title ?? "Unknown Title",
     companyName:    mostRecent?.company ?? "Unknown Company",
-    dates:          `${start} – ${end}`,
+    dates:          mostRecent ? _formatRoleDateRange(mostRecent.startDate, mostRecent.endDate) : "unknown – unknown",
+    // Summary-specific identity contract: every allowed role/company/date range.
+    allowedRoles:   careerMemory.jobs.map((job) => ({
+      jobTitle:    job.title,
+      companyName: job.company,
+      dates:       _formatRoleDateRange(job.startDate, job.endDate),
+    })),
     userSkills,
     degreeStatus,
     userMetrics,     // ← career-wide source data, never generated output
@@ -269,39 +276,34 @@ type SummaryVerdict =
 /**
  * Pure decision function for a terminal summary verification result.
  * Exported for unit tests — no DB, no LLM.
+ *
+ * Fail-closed policy (Codex review 2026-09-23): ANY terminal verification
+ * failure — a failed rule of any number, or a verifier outage — quarantines
+ * the summary. The candidate must never silently export generated text that
+ * was not verified; the honest fallback is omission plus an explicit
+ * invitation to write their own summary in the editor. This mirrors the
+ * bullet path, which deletes rejected generated bullets rather than
+ * publishing them with a warning nobody sees.
  */
 export function _decideSummaryPersistence(
   passed: boolean,
   checks: VerifierChecks,
   userMessage: string | null
 ): SummaryVerdict {
-  const failedRules = _failedSummaryRuleNumbers(checks);
-  const trustFailure = failedRules.some((r) => SUMMARY_TRUST_RULE_NUMBERS.has(r));
-  // All checks skipped + not passed = verifier outage, not evidence of fabrication.
-  const verifierOutage = !passed && failedRules.length === 0;
-
   if (passed) return { action: "persist", warning: null };
 
-  if (verifierOutage) {
-    return {
-      action: "persist",
-      warning: userMessage
-        ?? "The career summary could not be automatically verified (verification service unavailable). Please review it before exporting.",
-    };
-  }
-
-  if (trustFailure) {
-    return {
-      action: "quarantine",
-      warning:
-        "The AI-generated summary failed verification against your work history, so it was " +
-        "left out rather than risk an inaccurate claim. You can write your own summary in the editor.",
-    };
-  }
+  const failedRules = _failedSummaryRuleNumbers(checks);
+  // All checks skipped + not passed = verifier outage, not evidence of
+  // fabrication — still fail closed: an unverifiable summary is omitted,
+  // not persisted silently.
+  const verifierOutage = failedRules.length === 0;
 
   return {
-    action: "persist",
-    warning: `The career summary was saved but flagged for review (checks failed: ${failedRules.join(", ")}). Please review it before exporting.`,
+    action: "quarantine",
+    warning: verifierOutage
+      ? (userMessage ??
+        "The career summary could not be automatically verified (verification service unavailable), so it was left out rather than risk an inaccurate claim. You can write your own summary in the editor.")
+      : `The AI-generated summary failed verification (checks failed: ${failedRules.join(", ")}), so it was left out rather than risk an inaccurate claim. You can write your own summary in the editor.`,
   };
 }
 
