@@ -31,6 +31,13 @@ import type {
 // Exported so the orchestrator can type-check its construction.
 // ---------------------------------------------------------------------------
 
+/** One allowed role/company/date range in the summary-mode identity contract. */
+export interface SummaryAllowedRole {
+  jobTitle: string;
+  companyName: string;
+  dates: string;
+}
+
 export interface VerifierContext {
   /** The job title the bullets are written for */
   jobTitle: string;
@@ -38,6 +45,13 @@ export interface VerifierContext {
   companyName: string;
   /** Employment dates, e.g. "Jan 2020 – Mar 2022" */
   dates: string;
+  /**
+   * Summary-mode identity set. When present, Rules 1 and 5 are judged against
+   * EVERY listed role — a career summary legitimately spans the whole work
+   * history — instead of the singular jobTitle/companyName/dates above. The
+   * bullet path leaves this undefined and keeps single-role semantics.
+   */
+  allowedRoles?: SummaryAllowedRole[];
   /** Skills and tools the user actually mentioned — used for Rule 2 */
   userSkills: string[];
   /** Degree status — used for Rule 3 */
@@ -127,6 +141,48 @@ Rules (check in this exact order, fail fast):
 9. No qualifier upgrades: for each entry in qualifiers, the bullets must not describe that skill at a higher level than the user stated (e.g. "basic Python" must not appear as "proficient Python" or "expert Python").`;
 
 // ---------------------------------------------------------------------------
+// Summary-mode system prompt (P0-1, Codex review 2026-09-23)
+//
+// A career summary legitimately spans the candidate's whole work history, so
+// Rules 1 and 5 are reworded against the career-wide contract: the summary may
+// name ANY company, title, or date in allowedSourceRoles, and evidence is
+// judged against the full history rather than one role. All other rules are
+// identical to the bullet prompt. Selected automatically by runVerifier when
+// the context carries allowedRoles; the bullet path is untouched.
+// ---------------------------------------------------------------------------
+
+const SUMMARY_SYSTEM_PROMPT = `You are a strict resume quality-assurance verifier.
+You receive a structured JSON payload describing a generated career summary and must
+check it against exactly 9 rules, in order, failing fast on the first violation.
+
+Return ONLY valid JSON matching this exact shape:
+{
+  "passed": boolean,
+  "failedChecks": [
+    { "rule": <number 1-9>, "description": "<short human-readable rule name>", "evidence": "<quoted text from the summary proving the violation>" }
+  ]
+}
+
+If all rules pass, return: { "passed": true, "failedChecks": [] }
+If a rule fails, return exactly one entry in failedChecks and stop checking further rules.
+
+This is a CAREER SUMMARY, not a single-role bullet block: it legitimately spans the
+candidate's whole work history. allowedSourceRoles lists every role (company, title,
+dates). sourceJobTitle, sourceCompanyName and sourceDates describe the most recent
+role only — they are NOT the full identity boundary.
+
+Rules (check in this exact order, fail fast):
+1. Career-wide identity fidelity: the summary may name any company, title, or date listed in allowedSourceRoles. Only flag text that explicitly names a company, title, or date that conflicts with EVERY entry in allowedSourceRoles. NEVER compare role identity with targetJobDescription.
+2. No invented skills/tools: the summary must not mention any skill, tool, technology, or framework that does not appear in userSkills.
+3. Degree status accuracy: if degreeStatus is present, the summary must use "conferred" for awarded degrees and "expected" for in-progress degrees — never the wrong word.
+4. Metric fidelity: every number or metric in the summary must appear verbatim in userMetrics. No invented percentages, dollar amounts, or multipliers.
+5. Career-wide evidence grounding: judge the summary only against currentRoleSourceEvidence, which spans the whole work history. Flag a concrete claim only when the evidence contradicts it. Do NOT flag a claim merely because it describes a different role than the most recent one.
+6. Job-description tailoring: the summary must reference a skill, keyword, or responsibility present in jobDescription. If it does not, the resume is not tailored.
+7. No em dashes: the summary must contain no em dash character (—) anywhere.
+8. No forbidden buzzwords: the summary must not contain any of these words or phrases (case-insensitive): leveraged, spearheaded, synergized, dynamic, results-driven, passionate, detail-oriented, innovative, strategic thinker, responsible for.
+9. No qualifier upgrades: for each entry in qualifiers, the summary must not describe that skill at a higher level than the user stated (e.g. "basic Python" must not appear as "proficient Python" or "expert Python").`;
+
+// ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
 
@@ -135,6 +191,11 @@ function _buildUserMessage(context: VerifierContext, previousFailure?: _LLMFaile
     sourceJobTitle:    context.jobTitle,
     sourceCompanyName: context.companyName,
     sourceDates:       context.dates,
+    // Summary-mode identity contract: every allowed role/company/date range.
+    // The summary prompt judges Rules 1 and 5 against this list.
+    ...(context.allowedRoles && context.allowedRoles.length > 0
+      ? { allowedSourceRoles: context.allowedRoles }
+      : {}),
     userSkills:    context.userSkills,
     degreeStatus:  context.degreeStatus ?? null,
     userMetrics:   context.userMetrics,
@@ -308,10 +369,34 @@ function _isSpuriousIdentityFailure(
   if (!evidence) return true;
   if (/\b(source job title|source company name|source dates)\b/.test(evidence)) return true;
 
-  const sourceIdentity = [context.jobTitle, context.companyName, context.dates]
-    .map(_normalizeEvidence)
-    .filter(Boolean);
-  if (sourceIdentity.some((value) => evidence.includes(value))) return true;
+  const allowedRoles = context.allowedRoles?.length
+    ? context.allowedRoles
+    : [{
+        jobTitle: context.jobTitle,
+        companyName: context.companyName,
+        dates: context.dates,
+      }];
+  const normalizedRoles = allowedRoles.map((role) => [
+    _normalizeEvidence(role.jobTitle),
+    _normalizeEvidence(role.companyName),
+    _normalizeEvidence(role.dates),
+  ].filter(Boolean));
+  const citedIdentityValues = Array.from(new Set(
+    normalizedRoles
+      .flat()
+      .filter((value) => evidence.includes(value))
+  ));
+
+  if (citedIdentityValues.length > 0) {
+    // Preserve title/company/date relationships. Flattening every value into
+    // one set would incorrectly approve a fabricated hybrid assembled from
+    // separate real roles (for example, one role's title at another role's
+    // company). Clear the model failure only when one allowed role contains
+    // every identity value cited in the evidence.
+    return normalizedRoles.some((roleValues) =>
+      citedIdentityValues.every((value) => roleValues.includes(value))
+    );
+  }
 
   const rawEvidence = failure.evidence.trim();
   const citesDate = /\b(?:19|20)\d{2}\b|\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b/i.test(rawEvidence);
@@ -440,6 +525,14 @@ export async function runVerifier(
   let lastFailed: _LLMFailedCheck[] = [];
   let lastProvider   = "unknown";
 
+  // Summary mode: the context carries the career-wide identity contract
+  // (allowedRoles), so Rules 1 and 5 use the career-wide prompt wording.
+  // The bullet path leaves allowedRoles undefined — prompt unchanged.
+  const systemPrompt =
+    context.allowedRoles && context.allowedRoles.length > 0
+      ? SUMMARY_SYSTEM_PROMPT
+      : SYSTEM_PROMPT;
+
   while (attemptNumber < MAX_RETRIES) {
     attemptNumber++;
 
@@ -456,7 +549,7 @@ export async function runVerifier(
       const result = await route({
         tier:         "tier1",
         agent:        "verifier",
-        systemPrompt: SYSTEM_PROMPT,
+        systemPrompt,
         messages:     [{ role: "user", content: userContent }],
         maxTokens:    150, // verdict JSON is small; slightly above 100 for safety
       });

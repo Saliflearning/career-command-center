@@ -68,6 +68,10 @@ Return ONLY the summary text — no JSON, no markdown, no explanation. Just the 
  * @param careerMemory    Canonical CareerMemory (normalizer output)
  * @param jdAnalysis      Canonical JDAnalysis (JD analyst output)
  * @param strategy        Canonical ResumeStrategy (strategy agent output)
+ * @param teachingContext Optional teaching examples injected into the brief
+ * @param retryInstructions Optional verifier feedback from a failed verification
+ *                          attempt — appended as revision instructions so the
+ *                          model corrects the flagged issue surgically
  * @returns               SummaryWriterOutput (lib/types/summary-writer-output.ts)
  */
 export async function runSummaryWriter(
@@ -75,7 +79,8 @@ export async function runSummaryWriter(
   careerMemory: CareerMemory,
   jdAnalysis: JDAnalysis,
   strategy: ResumeStrategy,
-  teachingContext = ""
+  teachingContext = "",
+  retryInstructions?: string
 ): Promise<SummaryWriterOutput> {
   const generatedAt = new Date().toISOString();
 
@@ -121,6 +126,8 @@ strengths directly. Do not say the candidate has ownership-level authority
 authority, or executive accountability) unless that exact evidence appears above.
 
 ${teachingContext ? `${teachingContext}\n` : ""}
+
+${retryInstructions ? `REVISION INSTRUCTIONS (a quality check flagged an issue in the previous draft — fix exactly what is described below, do not rewrite everything):\n${retryInstructions}\n` : ""}
 
 Write the 2–3 sentence career summary now.
 `.trim();

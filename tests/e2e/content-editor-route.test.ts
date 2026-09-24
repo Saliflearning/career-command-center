@@ -189,6 +189,7 @@ describe("PATCH /api/resume/[id]/content bullet persistence", () => {
         state: "USER_EDITING",
         version: { increment: 1 },
         summaryText: "A stronger, truthful summary.",
+        summaryVerificationJson: null,
         pdfUrl: null,
         latexSource: null,
         exportedAt: null,

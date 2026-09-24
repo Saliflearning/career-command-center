@@ -36,6 +36,8 @@ import type {
   JDAnalysis,
   ResumeStrategy,
   BulletWriterOutput,
+  VerifierChecks,
+  VerifierCheck,
 } from "@/lib/types";
 
 import { runIntake }         from "@/agents/intake";
@@ -60,6 +62,27 @@ import { runResumeVisualQualityGate } from "@/lib/resume/visual-quality-gate";
 
 /** Maximum outer retries per work history entry (verifier → bullet-writer loop) */
 const MAX_OUTER_RETRIES = 2;
+
+/**
+ * Maximum summary regenerations after a failed verification. Capped at 1 (not 2
+ * like bullets) because the summary generator is tier2/expensive and there is
+ * only one summary; the verifier's retryInstructions are specific enough for a
+ * single targeted rewrite.
+ */
+const SUMMARY_MAX_REGENERATIONS = 1;
+
+/** VerifierChecks field name → rule number (inverse of verifier's RULE_TO_CHECK). */
+const VERIFIER_RULE_NUMBER_BY_CHECK: Record<keyof VerifierChecks, number> = {
+  companyTitleDatesMatch: 1,
+  noFabricatedSkills: 2,
+  degreeStatusAccurate: 3,
+  metricsMatchUserInput: 4,
+  noCrossJobContamination: 5,
+  tailoredToJD: 6,
+  noEmDashes: 7,
+  noForbiddenBuzzwords: 8,
+  qualifierRuleHeld: 9,
+};
 
 // ---------------------------------------------------------------------------
 // Observability helpers
@@ -164,6 +187,123 @@ async function _buildVerifierContext(
     jobDescription: jdText,
     bullets:        generatedBulletStrings,
     qualifiers,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// P0-1: career-wide verifier context for the summary.
+//
+// Unlike _buildVerifierContext (scoped to ONE work-history entry), the summary
+// spans the whole career, so userMetrics / sourceEvidence / userSkills are drawn
+// from every non-generated bullet in CareerMemory. CareerMemory already carries
+// bullet.metrics and contentType, so no DB round-trip is needed.
+//
+// Identity contract (Codex review 2026-09-23): the summary-specific
+// `allowedRoles` lists EVERY role/company/date range in the work history.
+// Rules 1 and 5 are judged against the full list — a truthful summary that
+// mentions an older role (e.g. Amazon) alongside the most recent one (e.g.
+// Resultant) must verify, not be quarantined as cross-job contamination.
+// ---------------------------------------------------------------------------
+
+/** "2021-03-01" (ISO) → "2021-03"; null endDate → "present". */
+function _formatRoleDateRange(startDate: string, endDate: string | null): string {
+  const start = startDate ? new Date(startDate).toISOString().slice(0, 7) : "unknown";
+  const end = endDate ? new Date(endDate).toISOString().slice(0, 7) : "present";
+  return `${start} – ${end}`;
+}
+
+export function _buildSummaryVerifierContext(
+  careerMemory: CareerMemory,
+  jdText: string,
+  summaryText: string
+): VerifierContext {
+  const mostRecent = careerMemory.jobs[0];
+
+  // Career-wide ground truth: every bullet the user provided. GENERATED
+  // rewrites are excluded — the verifier must judge against source data.
+  const sourceBullets = careerMemory.jobs
+    .flatMap((job) => job.bullets)
+    .filter((bullet) => bullet.contentType !== "GENERATED");
+
+  const userMetrics = Array.from(new Set(sourceBullets.flatMap((bullet) => [
+    ...bullet.metrics,
+    ...extractMetricTokens(bullet.content),
+  ])));
+  const sourceEvidence = sourceBullets.map((bullet) => bullet.content);
+
+  const userSkills = careerMemory.skills.map((s) => s.name);
+  const qualifiers = careerMemory.skills
+    .filter((s) => s.proficiencyLabel !== null)
+    .map((s) => ({ skill: s.name, level: s.proficiencyLabel! }));
+
+  const hasConferredDegree = careerMemory.education.some((e) => !e.inProgress);
+  const degreeStatus: "conferred" | "expected" | undefined =
+    careerMemory.education.length
+      ? (hasConferredDegree ? "conferred" : "expected")
+      : undefined;
+
+  return {
+    jobTitle:       mostRecent?.title ?? "Unknown Title",
+    companyName:    mostRecent?.company ?? "Unknown Company",
+    dates:          mostRecent ? _formatRoleDateRange(mostRecent.startDate, mostRecent.endDate) : "unknown – unknown",
+    // Summary-specific identity contract: every allowed role/company/date range.
+    allowedRoles:   careerMemory.jobs.map((job) => ({
+      jobTitle:    job.title,
+      companyName: job.company,
+      dates:       _formatRoleDateRange(job.startDate, job.endDate),
+    })),
+    userSkills,
+    degreeStatus,
+    userMetrics,     // ← career-wide source data, never generated output
+    sourceEvidence,  // ← career-wide evidence: Rule 5 judges against the whole history
+    jobDescription: jdText,
+    bullets:        [summaryText], // the verifier checks text blocks; 1 block works unchanged
+    qualifiers,
+  };
+}
+
+/** Rule numbers (1–9) of the checks that failed in a VerifierResult. Exported for tests. */
+export function _failedSummaryRuleNumbers(checks: VerifierChecks): number[] {
+  return (Object.entries(checks) as Array<[keyof VerifierChecks, VerifierCheck]>)
+    .filter(([, check]) => check.status === "failed")
+    .map(([name]) => VERIFIER_RULE_NUMBER_BY_CHECK[name]);
+}
+
+type SummaryVerdict =
+  | { action: "persist"; warning: string | null }
+  | { action: "quarantine"; warning: string };
+
+/**
+ * Pure decision function for a terminal summary verification result.
+ * Exported for unit tests — no DB, no LLM.
+ *
+ * Fail-closed policy (Codex review 2026-09-23): ANY terminal verification
+ * failure — a failed rule of any number, or a verifier outage — quarantines
+ * the summary. The candidate must never silently export generated text that
+ * was not verified; the honest fallback is omission plus an explicit
+ * invitation to write their own summary in the editor. This mirrors the
+ * bullet path, which deletes rejected generated bullets rather than
+ * publishing them with a warning nobody sees.
+ */
+export function _decideSummaryPersistence(
+  passed: boolean,
+  checks: VerifierChecks,
+  userMessage: string | null
+): SummaryVerdict {
+  if (passed) return { action: "persist", warning: null };
+
+  const failedRules = _failedSummaryRuleNumbers(checks);
+  // All checks skipped + not passed = verifier outage, not evidence of
+  // fabrication — still fail closed: an unverifiable summary is omitted,
+  // not persisted silently.
+  const verifierOutage = failedRules.length === 0;
+
+  return {
+    action: "quarantine",
+    warning: verifierOutage
+      ? (userMessage ??
+        "The career summary could not be automatically verified (verification service unavailable), so it was left out rather than risk an inaccurate claim. You can write your own summary in the editor.")
+      : `The AI-generated summary failed verification (checks failed: ${failedRules.join(", ")}), so it was left out rather than risk an inaccurate claim. You can write your own summary in the editor.`,
   };
 }
 
@@ -592,34 +732,119 @@ export async function runPipeline(resumeId: string): Promise<void> {
         resume.jdKeywords,
         resume.id
       )) ?? "";
-      const summaryOutput = await runSummaryWriter(
+      // --- SUMMARY WRITER + VERIFIER (P0-1: never persist an unverified summary) ---
+      const jdTextForSummary = resume.jdText ?? "";
+      let summaryRegenerations = 0;
+
+      let summaryOutput = await runSummaryWriter(
         resumeId,
         careerMemory,
         jdAnalysis,
         strategy,
         teachingContext
       );
-      summaryText = summaryOutput.summaryText;
+      let summaryVerifierResult = await runVerifier(
+        _buildSummaryVerifierContext(careerMemory, jdTextForSummary, summaryOutput.summaryText),
+        `summary:${resumeId}`,
+        "summary",
+        resumeId
+      );
 
-      // Persist summary to Resume record and ResumeSection table
-      await db.resume.update({
-        where: { id: resumeId },
-        data:  { summaryText },
-      });
+      // Targeted regeneration on a fixable failure — mirrors the bullet
+      // pipeline's outer retry loop, capped at SUMMARY_MAX_REGENERATIONS.
+      while (
+        !summaryVerifierResult.passed &&
+        summaryVerifierResult.retryInstructions &&
+        summaryRegenerations < SUMMARY_MAX_REGENERATIONS
+      ) {
+        log("pipeline_summary_regen", resumeId, {
+          failedRules: _failedSummaryRuleNumbers(summaryVerifierResult.checks),
+          retryInstructions: summaryVerifierResult.retryInstructions,
+        });
+        summaryRegenerations++;
+        summaryOutput = await runSummaryWriter(
+          resumeId,
+          careerMemory,
+          jdAnalysis,
+          strategy,
+          teachingContext,
+          summaryVerifierResult.retryInstructions
+        );
+        summaryVerifierResult = await runVerifier(
+          _buildSummaryVerifierContext(careerMemory, jdTextForSummary, summaryOutput.summaryText),
+          `summary:${resumeId}`,
+          "summary",
+          resumeId
+        );
+      }
 
-      // Upsert the summary section record
-      const existing = await db.resumeSection.findFirst({
-        where: { resumeId, name: "summary" },
-      });
-      if (existing) {
-        await db.resumeSection.update({ where: { id: existing.id }, data: { content: summaryText } });
+      const summaryFailedRules = _failedSummaryRuleNumbers(summaryVerifierResult.checks);
+      const summaryVerdict = _decideSummaryPersistence(
+        summaryVerifierResult.passed,
+        summaryVerifierResult.checks,
+        summaryVerifierResult.userMessage
+      );
+
+      // Machine-readable verdict for workspace badging ("Verified" / "Needs review").
+      const summaryVerificationJson = {
+        passed: summaryVerifierResult.passed,
+        failedRules: summaryFailedRules,
+        action: summaryVerdict.action,
+        userMessage: summaryVerdict.warning,
+        agentVersion: summaryVerifierResult.agentVersion,
+        provider: summaryVerifierResult.provider,
+        verifiedAt: summaryVerifierResult.verifiedAt,
+      };
+
+      if (summaryVerdict.action === "persist") {
+        // Persist summary to Resume record and ResumeSection table
+        summaryText = summaryOutput.summaryText;
+        await db.resume.update({
+          where: { id: resumeId },
+          data:  { summaryText, summaryVerificationJson },
+        });
+
+        // Upsert the summary section record
+        const existing = await db.resumeSection.findFirst({
+          where: { resumeId, name: "summary" },
+        });
+        if (existing) {
+          await db.resumeSection.update({ where: { id: existing.id }, data: { content: summaryText } });
+        } else {
+          await db.resumeSection.create({
+            data: { resumeId, name: "summary", content: summaryText, sortOrder: 0 },
+          });
+        }
       } else {
-        await db.resumeSection.create({
-          data: { resumeId, name: "summary", content: summaryText, sortOrder: 0 },
+        // QUARANTINE: a trust-critical check failed after regeneration — the text
+        // may contain a fabricated claim, so it is NOT persisted. summaryText
+        // stays "" so LaTeX and the workspace render without a summary section.
+        // Any stale summary row from a previous run is removed so old,
+        // unverified text cannot linger.
+        await db.resume.update({
+          where: { id: resumeId },
+          data:  { summaryText: null, summaryVerificationJson },
+        });
+        await db.resumeSection.deleteMany({ where: { resumeId, name: "summary" } });
+      }
+
+      if (summaryVerdict.warning) {
+        log("pipeline_summary_verify_warn", resumeId, {
+          action: summaryVerdict.action,
+          failedRules: summaryFailedRules,
+          regenerations: summaryRegenerations,
+          userMessage: summaryVerdict.warning,
         });
       }
 
-      stepTimings.push(timer.end("ok", { wordCount: summaryOutput.wordCount }));
+      stepTimings.push(timer.end(summaryVerifierResult.passed ? "ok" : "warn", {
+        wordCount: summaryOutput.wordCount,
+        verifierPassed: summaryVerifierResult.passed,
+        failedRules: summaryFailedRules,
+        regenerations: summaryRegenerations,
+        action: summaryVerdict.action,
+        summaryWarning: summaryVerdict.warning,
+      }));
       log("pipeline_step_done", resumeId, { step: "summary_writer", durationMs: stepTimings.at(-1)!.durationMs });
 
       // Transition to GENERATING

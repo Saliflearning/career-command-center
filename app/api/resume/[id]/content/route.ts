@@ -504,7 +504,7 @@ export async function PATCH(
           id,
           patch.expectedRevision,
           resume.state,
-          { summaryText: patch.content }
+          { summaryText: patch.content, summaryVerificationJson: null }
         );
       });
     } catch (error) {

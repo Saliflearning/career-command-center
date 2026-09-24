@@ -139,7 +139,7 @@ import { runVerifier }                 from "@/agents/verifier";
 import { generateLatexSource }         from "@/lib/latex/generator";
 import { runResumeVisualQualityGate }  from "@/lib/resume/visual-quality-gate";
 
-import { runPipeline }                 from "@/agents/orchestrator";
+import { runPipeline, _buildSummaryVerifierContext } from "@/agents/orchestrator";
 
 // ---------------------------------------------------------------------------
 // Typed mock handles
@@ -274,6 +274,63 @@ const mockWorkHistoryDB = {
     contentType: "VERIFIED",
     metrics:     ["40%"],
   }],
+};
+
+/**
+ * Two-role CareerMemory for the P0-1 summary-contract regression test
+ * (Codex review 2026-09-23): an older Amazon role plus a newer Resultant
+ * role. A truthful summary mentioning both must verify, not quarantine.
+ */
+const twoRoleCareerMemory: CareerMemory = {
+  ...mockCareerMemory,
+  jobs: [
+    {
+      id:             "wh-resultant-001",
+      company:        "Resultant",
+      title:          "Senior Product Manager",
+      startDate:      "2022-01-01T00:00:00.000Z",
+      endDate:        null,
+      current:        true,
+      location:       "Indianapolis, IN",
+      employmentType: "full-time",
+      bullets: [{
+        id:                "bullet-source-resultant-1",
+        content:           "Led activation initiative reducing time-to-first-charge by 40%",
+        contentType:       "VERIFIED",
+        metrics:           ["40%"],
+        keywords:          ["activation"],
+        locked:            false,
+        usedInResumeCount: 0,
+      }],
+      sourceType: "UPLOADED",
+      verified:   true,
+      locked:     false,
+      sortOrder:  0,
+    },
+    {
+      id:             "wh-amazon-001",
+      company:        "Amazon",
+      title:          "Operations Manager",
+      startDate:      "2019-06-01T00:00:00.000Z",
+      endDate:        "2021-12-01T00:00:00.000Z",
+      current:        false,
+      location:       "Seattle, WA",
+      employmentType: "full-time",
+      bullets: [{
+        id:                "bullet-source-amazon-1",
+        content:           "Ran inbound operations for a 12-person fulfillment team",
+        contentType:       "VERIFIED",
+        metrics:           ["12-person"],
+        keywords:          ["operations"],
+        locked:            false,
+        usedInResumeCount: 0,
+      }],
+      sourceType: "UPLOADED",
+      verified:   true,
+      locked:     false,
+      sortOrder:  1,
+    },
+  ],
 };
 
 const mockJDAnalysis: JDAnalysis = {
@@ -582,7 +639,14 @@ describe("Orchestrator — happy path (UPLOADED → QA_REVIEWED)", () => {
     expect(mockRunStrategy).toHaveBeenCalledTimes(1);
     expect(mockRunSummaryWriter).toHaveBeenCalledTimes(1);
     expect(mockRunBulletWriter).toHaveBeenCalledTimes(1);
-    expect(mockRunVerifier).toHaveBeenCalledTimes(1);
+    // Verifier runs twice: Step 5 verifies the career summary, Step 6 the bullets
+    expect(mockRunVerifier).toHaveBeenCalledTimes(2);
+    const [summaryVerifierCtx] = (mockRunVerifier as jest.Mock).mock.calls[0];
+    const [bulletVerifierCtx] = (mockRunVerifier as jest.Mock).mock.calls[1];
+    expect(summaryVerifierCtx.bullets).toEqual([mockSummaryOutput.summaryText]);
+    expect(bulletVerifierCtx.bullets).toContain(
+      "Led activation initiative cutting time-to-first-charge by 40% across 2M merchants"
+    );
     expect(mockGenerateLatex).toHaveBeenCalledTimes(1);
   });
 
@@ -715,13 +779,160 @@ describe("Orchestrator — happy path (UPLOADED → QA_REVIEWED)", () => {
 
   it("passes bullet content strings to the verifier", async () => {
     await runPipeline(RESUME_ID);
-    const [verifierContext] = (mockRunVerifier as jest.Mock).mock.calls[0];
+    // calls[0] is the Step 5 summary verification; bullets are checked in calls[1]
+    const [verifierContext] = (mockRunVerifier as jest.Mock).mock.calls[1];
     expect(verifierContext.bullets).toContain(
       "Led activation initiative cutting time-to-first-charge by 40% across 2M merchants"
     );
     expect(verifierContext.sourceEvidence).toContain(
       "Led activation initiative reducing time-to-first-charge by 40%"
     );
+  });
+
+  it("verifies the career summary before persisting it", async () => {
+    await runPipeline(RESUME_ID);
+
+    // Step 5 runs the verifier on the summary before anything is persisted
+    const [summaryVerifierCtx] = (mockRunVerifier as jest.Mock).mock.calls[0];
+    expect(summaryVerifierCtx.bullets).toEqual([mockSummaryOutput.summaryText]);
+
+    const summaryUpdates = (mockDb.resume.update as jest.Mock).mock.calls.filter(
+      ([args]) => args?.data && "summaryVerificationJson" in args.data
+    );
+    expect(summaryUpdates).toHaveLength(1);
+    expect(summaryUpdates[0][0].data.summaryText).toBe(mockSummaryOutput.summaryText);
+    expect(summaryUpdates[0][0].data.summaryVerificationJson.passed).toBe(true);
+    expect(summaryUpdates[0][0].data.summaryVerificationJson.action).toBe("persist");
+  });
+
+  it("quarantines the summary on trust-critical verifier failure", async () => {
+    const failedChecks = {
+      ...makePassing().checks,
+      metricsMatchUserInput: {
+        rule: "Metrics match user input",
+        status: "failed",
+        detail: "40% appears in no source bullet",
+      },
+    };
+    (mockRunVerifier as jest.Mock)
+      .mockResolvedValueOnce({
+        ...makePassing(),
+        passed: false,
+        checks: failedChecks,
+        retryInstructions: null,
+        userMessage: "Summary failed verification",
+      })
+      .mockResolvedValue(makePassing()); // Step 6 bullet verification still passes
+
+    await runPipeline(RESUME_ID);
+
+    const summaryUpdates = (mockDb.resume.update as jest.Mock).mock.calls.filter(
+      ([args]) => args?.data && "summaryVerificationJson" in args.data
+    );
+    expect(summaryUpdates).toHaveLength(1);
+    expect(summaryUpdates[0][0].data.summaryText).toBeNull();
+    expect(summaryUpdates[0][0].data.summaryVerificationJson.action).toBe("quarantine");
+  });
+
+  it("builds a career-wide identity contract for the summary (two-role regression)", () => {
+    // Codex review 2026-09-23: the old contract only carried jobs[0], so a
+    // truthful summary mentioning an older Amazon role next to the newer
+    // Resultant role could be quarantined as cross-job contamination.
+    const context = _buildSummaryVerifierContext(twoRoleCareerMemory, "jd text", "summary text");
+
+    expect(context.allowedRoles).toEqual([
+      { jobTitle: "Senior Product Manager", companyName: "Resultant", dates: "2022-01 – present" },
+      { jobTitle: "Operations Manager",     companyName: "Amazon",    dates: "2019-06 – 2021-12" },
+    ]);
+    // Singular identity fields still describe the most recent role
+    expect(context.companyName).toBe("Resultant");
+    expect(context.jobTitle).toBe("Senior Product Manager");
+    // Ground truth spans both roles, never generated output
+    expect(context.sourceEvidence).toHaveLength(2);
+    expect(context.userMetrics).toContain("40%");
+  });
+
+  it("verifies a truthful two-role summary instead of quarantining it", async () => {
+    mockRunNormalizer.mockResolvedValue(twoRoleCareerMemory);
+    await runPipeline(RESUME_ID);
+
+    // Step 5 hands the verifier the career-wide contract…
+    const [summaryVerifierCtx] = (mockRunVerifier as jest.Mock).mock.calls[0];
+    expect(summaryVerifierCtx.allowedRoles).toEqual([
+      { jobTitle: "Senior Product Manager", companyName: "Resultant", dates: "2022-01 – present" },
+      { jobTitle: "Operations Manager",     companyName: "Amazon",    dates: "2019-06 – 2021-12" },
+    ]);
+
+    // …so a passing verification persists the summary instead of quarantining it
+    const summaryUpdates = (mockDb.resume.update as jest.Mock).mock.calls.filter(
+      ([args]) => args?.data && "summaryVerificationJson" in args.data
+    );
+    expect(summaryUpdates).toHaveLength(1);
+    expect(summaryUpdates[0][0].data.summaryText).toBe(mockSummaryOutput.summaryText);
+    expect(summaryUpdates[0][0].data.summaryVerificationJson.action).toBe("persist");
+  });
+
+  it("quarantines the summary on a non-trust rule failure (fail-closed)", async () => {
+    // Codex review 2026-09-23: persist-with-warning is not user-visible, so
+    // every terminal failure quarantines — no silent unverified exports.
+    const failedChecks = {
+      ...makePassing().checks,
+      tailoredToJD: {
+        rule: "Tailored to job description",
+        status: "failed",
+        detail: "Summary does not reference the JD",
+      },
+    };
+    (mockRunVerifier as jest.Mock)
+      .mockResolvedValueOnce({
+        ...makePassing(),
+        passed: false,
+        checks: failedChecks,
+        retryInstructions: null,
+        userMessage: "Summary failed verification",
+      })
+      .mockResolvedValue(makePassing()); // Step 6 bullet verification still passes
+
+    await runPipeline(RESUME_ID);
+
+    const summaryUpdates = (mockDb.resume.update as jest.Mock).mock.calls.filter(
+      ([args]) => args?.data && "summaryVerificationJson" in args.data
+    );
+    expect(summaryUpdates).toHaveLength(1);
+    expect(summaryUpdates[0][0].data.summaryText).toBeNull();
+    expect(summaryUpdates[0][0].data.summaryVerificationJson.action).toBe("quarantine");
+    expect(summaryUpdates[0][0].data.summaryVerificationJson.failedRules).toEqual([6]);
+    expect(summaryUpdates[0][0].data.summaryVerificationJson.userMessage).toContain("left out");
+  });
+
+  it("quarantines the summary on verifier outage (fail-closed)", async () => {
+    const skippedChecks = Object.fromEntries(
+      Object.entries(makePassing().checks).map(([name, check]) => [
+        name,
+        { ...check, status: "skipped", detail: "Verifier service unavailable" },
+      ])
+    ) as VerifierChecks;
+    (mockRunVerifier as jest.Mock)
+      .mockResolvedValueOnce({
+        ...makePassing(),
+        passed: false,
+        checks: skippedChecks,
+        retryInstructions: null,
+        maxRetriesReached: true,
+        userMessage:
+          "Quality checks could not be completed — the verification service was unavailable. Please review your resume manually before exporting.",
+      })
+      .mockResolvedValue(makePassing()); // Step 6 bullet verification still passes
+
+    await runPipeline(RESUME_ID);
+
+    const summaryUpdates = (mockDb.resume.update as jest.Mock).mock.calls.filter(
+      ([args]) => args?.data && "summaryVerificationJson" in args.data
+    );
+    expect(summaryUpdates).toHaveLength(1);
+    expect(summaryUpdates[0][0].data.summaryText).toBeNull();
+    expect(summaryUpdates[0][0].data.summaryVerificationJson.action).toBe("quarantine");
+    expect(summaryUpdates[0][0].data.summaryVerificationJson.failedRules).toEqual([]);
   });
 
   it("derives verifier metrics from source text when metric metadata is empty", async () => {
@@ -732,7 +943,8 @@ describe("Orchestrator — happy path (UPLOADED → QA_REVIEWED)", () => {
 
     await runPipeline(RESUME_ID);
 
-    const [verifierContext] = (mockRunVerifier as jest.Mock).mock.calls[0];
+    // calls[0] is the Step 5 summary verification; bullets are checked in calls[1]
+    const [verifierContext] = (mockRunVerifier as jest.Mock).mock.calls[1];
     expect(verifierContext.userMetrics).toContain("40%");
   });
 
@@ -939,7 +1151,7 @@ describe("Orchestrator — JDAnalysis + Strategy cache restore", () => {
     // Downstream agents still run
     expect(mockRunSummaryWriter).toHaveBeenCalledTimes(1);
     expect(mockRunBulletWriter).toHaveBeenCalledTimes(1);
-    expect(mockRunVerifier).toHaveBeenCalledTimes(1);
+    expect(mockRunVerifier).toHaveBeenCalledTimes(2); // summary + bullets
   });
 
   it("persists jdAnalysisJson to Resume after calling runJDAnalyst", async () => {
