@@ -369,22 +369,34 @@ function _isSpuriousIdentityFailure(
   if (!evidence) return true;
   if (/\b(source job title|source company name|source dates)\b/.test(evidence)) return true;
 
-  const sourceIdentity = [
-    context.jobTitle,
-    context.companyName,
-    context.dates,
-    // Summary mode: a mention of ANY allowed role is a legitimate identity
-    // claim, so a Rule-1 failure citing one is spurious. (Bullet path:
-    // allowedRoles is undefined — behavior unchanged.)
-    ...(context.allowedRoles ?? []).flatMap((role) => [
-      role.jobTitle,
-      role.companyName,
-      role.dates,
-    ]),
-  ]
-    .map(_normalizeEvidence)
-    .filter(Boolean);
-  if (sourceIdentity.some((value) => evidence.includes(value))) return true;
+  const allowedRoles = context.allowedRoles?.length
+    ? context.allowedRoles
+    : [{
+        jobTitle: context.jobTitle,
+        companyName: context.companyName,
+        dates: context.dates,
+      }];
+  const normalizedRoles = allowedRoles.map((role) => [
+    _normalizeEvidence(role.jobTitle),
+    _normalizeEvidence(role.companyName),
+    _normalizeEvidence(role.dates),
+  ].filter(Boolean));
+  const citedIdentityValues = Array.from(new Set(
+    normalizedRoles
+      .flat()
+      .filter((value) => evidence.includes(value))
+  ));
+
+  if (citedIdentityValues.length > 0) {
+    // Preserve title/company/date relationships. Flattening every value into
+    // one set would incorrectly approve a fabricated hybrid assembled from
+    // separate real roles (for example, one role's title at another role's
+    // company). Clear the model failure only when one allowed role contains
+    // every identity value cited in the evidence.
+    return normalizedRoles.some((roleValues) =>
+      citedIdentityValues.every((value) => roleValues.includes(value))
+    );
+  }
 
   const rawEvidence = failure.evidence.trim();
   const citesDate = /\b(?:19|20)\d{2}\b|\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b/i.test(rawEvidence);

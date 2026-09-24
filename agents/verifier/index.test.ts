@@ -149,6 +149,34 @@ describe("verifier summary-mode contract", () => {
     expect(result.checks.companyTitleDatesMatch.status).toBe("passed");
   });
 
+  it("does not clear a fabricated title-company pairing assembled from two real roles", async () => {
+    mockedRoute.mockResolvedValue({
+      content: JSON.stringify({
+        passed: false,
+        failedChecks: [
+          {
+            rule: 1,
+            description: "Career-wide identity fidelity",
+            evidence: "Operations Manager at Resultant",
+          },
+        ],
+      }),
+      provider: "test",
+      tokensUsed: 20,
+      usedFallback: false,
+    });
+
+    const context: VerifierContext = {
+      ...makeSummaryContext(),
+      bullets: ["Operations Manager at Resultant with experience improving activation."],
+    };
+
+    const result = await runVerifier(context, "summary:res-1", "summary", "res-1");
+
+    expect(result.passed).toBe(false);
+    expect(result.checks.companyTitleDatesMatch.status).toBe("failed");
+  });
+
   it("still fails a Rule-1 claim about a company outside the history", async () => {
     mockedRoute.mockResolvedValue({
       content: JSON.stringify({
