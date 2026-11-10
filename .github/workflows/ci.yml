@@ -37,6 +37,10 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test -- --runInBand --silent
+      # Flag-on integration regression: render through the dispatcher and prove
+      # the output passes the real runVisualQA gate (needs the unpdf/PDF.js
+      # runtime, hence --experimental-vm-modules inside the script).
+      - run: npm run test:integration
 
   migration-bootstrap:
     name: Migration Bootstrap

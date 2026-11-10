@@ -14,6 +14,7 @@
     "test": "jest",
     "test:unit": "jest --selectProjects unit",
     "test:e2e": "jest --selectProjects e2e",
+    "test:integration": "node --experimental-vm-modules node_modules/jest/bin/jest.js --config jest.integration.config.ts --runInBand",
     "test:coverage": "jest --coverage",
     "test:watch": "jest --watch",
     "db:verify:migrations": "node scripts/verify-migration-history.mjs",

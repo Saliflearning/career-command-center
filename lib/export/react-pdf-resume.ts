@@ -12,9 +12,21 @@
  *   - same section order (summary, skills, experience, projects, education, certs)
  *   - same one-page guarantee via a density ladder; overflow throws the same
  *     StructuredResumeOverflowError the callers already handle.
+ *   - honors the saved editor presentation (font / scale / density), matching
+ *     the legacy renderer's applyPresentation mapping, so the downloaded PDF
+ *     reflects the same choices the editor preview shows.
  *
- * This module is NOT wired into the pipeline yet. It is selected only behind a
- * flag by the dispatcher, so turning it on or off never requires a code revert.
+ * Output is built to pass the production visual gate (agents/visual-qa):
+ *   - section headings carry NO letterSpacing, so they extract as contiguous
+ *     text the gate's section search can find (letter-spaced headings extract
+ *     as "P R O F E S S I O N A L" and fail).
+ *   - every rendered font size is floored at FONT_FLOOR (>= the gate's 9pt
+ *     minimum), mirroring the legacy renderer's max(9, ...) clamp.
+ *   - bullet markers are drawn (a filled View), not a font glyph, so they are
+ *     always visible regardless of a font's symbol coverage.
+ *
+ * This module is selected only behind a flag by the dispatcher, so turning it
+ * on or off never requires a code revert.
  */
 import path from "path";
 import fontkit from "fontkit";
@@ -36,6 +48,10 @@ import {
   StructuredResumeContentError,
 } from "./structured-resume-pdf";
 import {
+  DEFAULT_RESUME_PRESENTATION,
+  type ResumePresentation,
+} from "@/lib/resume/presentation";
+import {
   formatMonthYearUtc,
   formatMonthYearRangeUtc,
   formatEducationDateUtc,
@@ -45,14 +61,19 @@ import {
 
 const h = React.createElement;
 
-// Deep-navy accent on a white sheet; Times serif for the name, Helvetica for
-// body and labels. (Final step swaps in embedded Source Serif 4 / Source Sans 3;
-// the two built-ins keep this first cut dependency-free and ATS-clean.)
+// Deep-navy accent on a white sheet. Serif name over a clean body: the name is
+// always the serif face; body/labels follow the chosen font (serif or sans).
 const NAVY = "#1f3a5c";
 const NAVY_SOFT = "#5a6b82";
 const INK = "#1a1a18";
 const INK_SOFT = "#4f4f49";
 const RULE = "#d8d6cf";
+
+// The production visual gate (agents/visual-qa) fails fontConsistency when any
+// extracted text item is below 9pt. We floor every size a little above that so
+// extraction rounding can never cross the line; this mirrors the legacy
+// renderer's `Math.max(9, ...)` clamp in applyPresentation.
+const FONT_FLOOR = 9.5;
 
 // Embedded Source Serif 4 (name) + Source Sans 3 (body/labels), committed under
 // assets/fonts. Registration is lazy (fontkit reads the file at render), so the
@@ -129,61 +150,108 @@ function assertRenderable(input: StructuredResumeExportInput): void {
 
 interface Density {
   name: string;
-  base: number; // body font size (pt)
+  base: number; // body font size (pt) before the presentation scale
   leading: number; // line-height multiple
   margin: number; // horizontal page margin (pt)
   sectionGap: number; // space above each section (pt)
+  jobGap: number; // space below each job/project entry (pt)
+  bulletGap: number; // space above each bullet row (pt)
 }
 
-// Mirrors the legacy density ladder: try comfortable first, tighten until it
-// fits one US Letter page.
+// Try comfortable first, tighten until it fits one US Letter page. Every base
+// is >= FONT_FLOOR so body text is never rendered below the gate minimum; the
+// floor in makeStyles then protects the smaller label/date text as well.
+// Denser rungs recover space through inter-element spacing (jobGap, bulletGap,
+// leading) rather than by shrinking page margins or font sizes, so the visual
+// gate's margin and font-size floors are never at risk on a dense resume.
 const DENSITIES: Density[] = [
-  { name: "balanced", base: 9.8, leading: 1.42, margin: 50, sectionGap: 14 },
-  { name: "compact", base: 9.4, leading: 1.36, margin: 46, sectionGap: 12 },
-  { name: "focused", base: 9.1, leading: 1.3, margin: 44, sectionGap: 10 },
-  { name: "one-page-safe", base: 8.7, leading: 1.25, margin: 40, sectionGap: 9 },
+  { name: "balanced", base: 10.6, leading: 1.38, margin: 50, sectionGap: 14, jobGap: 11, bulletGap: 3 },
+  { name: "compact", base: 10.0, leading: 1.3, margin: 46, sectionGap: 11, jobGap: 8, bulletGap: 2.3 },
+  { name: "focused", base: 9.7, leading: 1.2, margin: 40, sectionGap: 8, jobGap: 5.5, bulletGap: 1.8 },
+  { name: "one-page-safe", base: 9.5, leading: 1.12, margin: 38, sectionGap: 6, jobGap: 3.5, bulletGap: 1.2 },
 ];
 
-function makeStyles(d: Density) {
-  const b = d.base;
+// Saved editor presentation -> render parameters. Mirrors the legacy renderer's
+// applyPresentation: scale multiplies sizes, density multiplies line spacing,
+// and the font choice selects the body/label face.
+interface RenderOpts {
+  fontScale: number;
+  leadingScale: number;
+  bodyFamily: string;
+}
+
+function renderOptsFor(presentation: ResumePresentation): RenderOpts {
+  const fontScale =
+    presentation.scale === "compact" ? 0.94 : presentation.scale === "large" ? 1.08 : 1;
+  const leadingScale =
+    presentation.density === "tight" ? 0.9 : presentation.density === "open" ? 1.12 : 1;
+  // "system" is a sans-serif stack in the editor; render it with the sans face.
+  const bodyFamily = presentation.font === "serif" ? SERIF : SANS;
+  return { fontScale, leadingScale, bodyFamily };
+}
+
+function round1(value: number): number {
+  return Math.round(value * 10) / 10;
+}
+
+function makeStyles(d: Density, opts: RenderOpts) {
+  const b = d.base * opts.fontScale; // scaled body size
+  // Font sizes are floored so no extracted text item falls below the gate's 9pt
+  // minimum; sizes above the floor keep the type hierarchy intact.
+  const sz = (factor: number) => Math.max(FONT_FLOOR, round1(b * factor));
+  const body = sz(1);
+  const label = sz(0.9);
+  const leading = round1(d.leading * opts.leadingScale);
+  const BODY = opts.bodyFamily;
   return StyleSheet.create({
     page: {
-      paddingTop: Math.round(d.margin * 0.82),
-      paddingBottom: Math.round(d.margin * 0.72),
+      // The visual gate rejects any page margin below 36pt (measured from the
+      // outermost text), so floor every side comfortably above it on all rungs.
+      paddingTop: Math.max(40, Math.round(d.margin * 0.82)),
+      paddingBottom: Math.max(38, Math.round(d.margin * 0.72)),
       paddingHorizontal: d.margin,
-      fontFamily: SANS,
+      fontFamily: BODY,
       color: INK_SOFT,
-      fontSize: b,
-      lineHeight: d.leading,
+      fontSize: body,
+      lineHeight: leading,
     },
-    name: { fontFamily: SERIF, fontWeight: 700, fontSize: b * 2.7, color: INK, letterSpacing: -0.3 },
-    headline: { fontFamily: SANS, fontWeight: 600, fontSize: b * 0.93, color: NAVY, marginTop: 3, letterSpacing: 0.3 },
+    name: { fontFamily: SERIF, fontWeight: 700, fontSize: round1(b * 2.7), color: INK, letterSpacing: -0.3 },
+    headline: { fontFamily: BODY, fontWeight: 600, fontSize: sz(0.95), color: NAVY, marginTop: 3 },
     contactRow: { flexDirection: "row", flexWrap: "wrap", marginTop: 7 },
-    contactItem: { fontSize: b * 0.9, color: INK_SOFT },
-    contactSep: { fontSize: b * 0.9, color: NAVY_SOFT, marginHorizontal: 5 },
+    contactItem: { fontSize: label, color: INK_SOFT },
+    contactSep: { fontSize: label, color: NAVY_SOFT, marginHorizontal: 5 },
     accentRule: { height: 1.6, backgroundColor: NAVY, marginTop: 9 },
     section: { marginTop: d.sectionGap },
+    // No letterSpacing on the heading: the visual gate searches extracted text
+    // for the section label, and letter-spacing makes it extract as separated
+    // characters ("P R O F E S S I O N A L") that never match. Weight + color +
+    // the trailing rule carry the premium treatment instead.
     secLabelRow: { flexDirection: "row", alignItems: "center", marginBottom: 6 },
-    secLabel: { fontFamily: SANS, fontWeight: 700, fontSize: b * 0.88, color: NAVY, letterSpacing: 1.3 },
+    secLabel: { fontFamily: BODY, fontWeight: 700, fontSize: label, color: NAVY },
     secRule: { flexGrow: 1, height: 0.8, backgroundColor: RULE, marginLeft: 9 },
     summary: { color: INK_SOFT },
     skillRow: { flexDirection: "row", marginBottom: 2.5 },
-    skillCat: { fontFamily: SANS, fontWeight: 700, color: INK, width: b * 11 },
-    skillVal: { color: INK_SOFT, flexGrow: 1, flexShrink: 1 },
-    job: { marginBottom: b * 1.05 },
+    skillCat: { fontFamily: BODY, fontWeight: 700, color: INK, width: b * 11, flexShrink: 0 },
+    // flexBasis:0 makes the value size come from the remaining row width, not its
+    // own content width, so a long comma list wraps inside the column instead of
+    // overflowing the right page margin.
+    skillVal: { color: INK_SOFT, flexGrow: 1, flexShrink: 1, flexBasis: 0 },
+    job: { marginBottom: d.jobGap },
     jobHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end" },
-    jobTitle: { fontFamily: SANS, fontWeight: 700, fontSize: b * 1.05, color: INK, flexShrink: 1, paddingRight: 8 },
-    jobDates: { fontSize: b * 0.9, color: INK_SOFT },
-    jobOrg: { fontFamily: SANS, fontWeight: 600, fontSize: b * 0.92, color: NAVY, marginTop: 1 },
-    bulletRow: { flexDirection: "row", marginTop: 3 },
-    bulletMark: { color: NAVY, fontSize: b * 0.9, marginRight: 5 },
-    bulletText: { flexGrow: 1, flexShrink: 1, color: INK_SOFT },
+    jobTitle: { fontFamily: BODY, fontWeight: 700, fontSize: sz(1.05), color: INK, flexShrink: 1, paddingRight: 8 },
+    jobDates: { fontSize: label, color: INK_SOFT },
+    jobOrg: { fontFamily: BODY, fontWeight: 600, fontSize: sz(0.92), color: NAVY, marginTop: 1 },
+    bulletRow: { flexDirection: "row", marginTop: d.bulletGap },
+    // Drawn marker, not a font glyph: always visible regardless of symbol-font
+    // coverage. Nudged down to sit against the first text line.
+    bulletMark: { width: 2.6, height: 2.6, backgroundColor: NAVY, borderRadius: 0.4, marginRight: 6, marginTop: round1(body * 0.34) },
+    bulletText: { flexGrow: 1, flexShrink: 1, flexBasis: 0, color: INK_SOFT },
     eduRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 },
     eduLeft: { flexShrink: 1, paddingRight: 8 },
-    eduDeg: { fontFamily: SANS, fontWeight: 700, color: INK },
-    eduSchool: { fontFamily: SANS, fontWeight: 600, fontSize: b * 0.92, color: NAVY, marginTop: 1 },
+    eduDeg: { fontFamily: BODY, fontWeight: 700, color: INK },
+    eduSchool: { fontFamily: BODY, fontWeight: 600, fontSize: sz(0.92), color: NAVY, marginTop: 1 },
     eduDetails: { color: INK_SOFT, marginTop: 1 },
-    eduDate: { fontSize: b * 0.9, color: INK_SOFT },
+    eduDate: { fontSize: label, color: INK_SOFT },
     certs: { color: INK_SOFT },
   });
 }
@@ -234,8 +302,8 @@ function section(st: Styles, label: string, body: React.ReactNode) {
     body);
 }
 
-function ResumeDocument(input: StructuredResumeExportInput, d: Density) {
-  const st = makeStyles(d);
+function ResumeDocument(input: StructuredResumeExportInput, d: Density, opts: RenderOpts) {
+  const st = makeStyles(d, opts);
   const c = input.candidate;
   const contacts = nonEmpty([c.location, c.phone, c.email, c.linkedin, c.website]);
   const skillGroups = groupSkills(input.skills);
@@ -287,7 +355,7 @@ function ResumeDocument(input: StructuredResumeExportInput, d: Density) {
           org ? h(Text, { style: st.jobOrg }, org) : null,
           ...nonEmpty(job.bullets).map((b, bi) =>
             h(View, { key: bi, style: st.bulletRow },
-              h(Text, { style: st.bulletMark }, "▪"),
+              h(View, { style: st.bulletMark }),
               h(Text, { style: st.bulletText }, b))));
       }))));
   }
@@ -347,9 +415,11 @@ export async function renderStructuredResumePdfReactPdf(
   }
   assertRenderable(input);
 
+  const opts = renderOptsFor(input.presentation ?? DEFAULT_RESUME_PRESENTATION);
+
   let lastDetail = "All density profiles overflowed.";
   for (const d of DENSITIES) {
-    const pdf = await renderToBuffer(ResumeDocument(input, d));
+    const pdf = await renderToBuffer(ResumeDocument(input, d, opts));
     const pages = countPdfPages(pdf);
     if (pages <= 1) {
       return { pdf, pageCount: 1, density: d.name, omittedContent: [] };
