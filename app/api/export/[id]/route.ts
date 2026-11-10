@@ -11,10 +11,10 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth/config";
 import { db } from "@/lib/db/client";
 import {
-  buildStructuredResumePdf,
   StructuredResumeContentError,
   StructuredResumeOverflowError,
 } from "@/lib/export/structured-resume-pdf";
+import { renderResumePdf } from "@/lib/export/render-resume-pdf";
 import {
   InvalidQuickResumeArtifactError,
   loadStructuredResumeSource,
@@ -69,7 +69,7 @@ export async function POST(
 
   let structuredRendered;
   try {
-    structuredRendered = buildStructuredResumePdf(source.input);
+    structuredRendered = await renderResumePdf(source.input);
   } catch (error) {
     if (error instanceof StructuredResumeOverflowError) {
       return NextResponse.json(
