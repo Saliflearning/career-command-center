@@ -1,10 +1,8 @@
 import { runVisualQA } from "@/agents/visual-qa";
 import { db } from "@/lib/db/client";
 import { loadStructuredResumeSource } from "@/lib/export/structured-resume-input";
-import {
-  buildStructuredResumePdf,
-  type StructuredResumeExportInput,
-} from "@/lib/export/structured-resume-pdf";
+import { type StructuredResumeExportInput } from "@/lib/export/structured-resume-pdf";
+import { renderResumePdf } from "@/lib/export/render-resume-pdf";
 import { storage } from "@/lib/storage/adapter";
 
 export const VISUAL_QA_SECTION = "visual_qa";
@@ -17,7 +15,7 @@ export async function runResumeVisualQualityGate(resumeId: string) {
   const source = await loadStructuredResumeSource(resumeId);
   if (!source) throw new Error(`Visual QA source not found for resume ${resumeId}`);
 
-  const rendered = buildStructuredResumePdf(source.input);
+  const rendered = await renderResumePdf(source.input);
   const pdfPath = `${source.userId}/${resumeId}/quality/final-preview.pdf`;
   const screenshotPath = `${source.userId}/${resumeId}/quality/final-preview.png`;
 
