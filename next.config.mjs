@@ -13,9 +13,15 @@ const nextConfig = {
   eslint: {
     ignoreDuringBuilds: true,
   },
-  // Document parsers break when bundled by webpack - load them from
-  // node_modules at runtime instead.
-  serverExternalPackages: ["unpdf", "@napi-rs/canvas", "mammoth"],
+  // Document parsers and the PDF renderer break when bundled by webpack - load
+  // them from node_modules at runtime instead.
+  serverExternalPackages: ["unpdf", "@napi-rs/canvas", "mammoth", "@react-pdf/renderer"],
+  // The react-pdf resume renderer reads embedded font files at render time via a
+  // runtime path (not a static import), so the tracer cannot see them. Ship them
+  // with any serverless function that may render a resume PDF.
+  outputFileTracingIncludes: {
+    "/api/**": ["./assets/fonts/*.ttf"],
+  },
 };
 
 export default withBotId(nextConfig);

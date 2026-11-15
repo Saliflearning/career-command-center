@@ -29,6 +29,10 @@ const config: Config = {
         "<rootDir>/agents/**/*.test.ts",
         "<rootDir>/lib/**/*.test.ts",
       ],
+      // Integration tests need the real unpdf/PDF.js runtime, which requires
+      // node --experimental-vm-modules; they run via the "test:integration"
+      // script and its own config, not the default suite.
+      testPathIgnorePatterns: ["/node_modules/", "\\.integration\\.test\\.ts$"],
       transform: {
         "^.+\\.tsx?$": [
           "ts-jest",
@@ -74,6 +78,7 @@ const config: Config = {
       testMatch: [
         "<rootDir>/tests/e2e/**/*.test.ts",
       ],
+      testPathIgnorePatterns: ["/node_modules/", "\\.integration\\.test\\.ts$"],
       transform: {
         "^.+\\.tsx?$": [
           "ts-jest",
