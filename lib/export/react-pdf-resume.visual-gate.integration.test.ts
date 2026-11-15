@@ -18,6 +18,7 @@ import fs from "fs";
 import { extractTextItems } from "unpdf";
 import { renderResumePdf } from "./render-resume-pdf";
 import { runVisualQA } from "@/agents/visual-qa";
+import { expectedSectionsFor } from "@/lib/resume/expected-sections";
 import type { StructuredResumeExportInput } from "./structured-resume-pdf";
 import type { ResumePresentation } from "@/lib/resume/presentation";
 
@@ -41,22 +42,6 @@ afterAll(() => {
   if (previousEngine === undefined) delete process.env[ENGINE];
   else process.env[ENGINE] = previousEngine;
 });
-
-// Mirror lib/resume/visual-quality-gate.ts expectedSectionsFor without importing
-// that module (it pulls in the db/storage adapters).
-function expectedSectionsFor(input: StructuredResumeExportInput): string[] {
-  const sections: string[] = [];
-  if (input.summary) sections.push("Professional Summary");
-  if (input.skills.length > 0) {
-    sections.push(
-      input.roleType === "TECHNICAL" || input.roleType === "DATA" ? "Technical Skills" : "Core Skills"
-    );
-  }
-  if (input.jobs.length > 0) sections.push("Professional Experience");
-  if (input.education.length > 0) sections.push("Education");
-  if (input.certifications.length > 0) sections.push("Certifications");
-  return sections;
-}
 
 function fullResume(presentation?: ResumePresentation): StructuredResumeExportInput {
   return {

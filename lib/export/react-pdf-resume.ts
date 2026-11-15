@@ -29,8 +29,11 @@
  * on or off never requires a code revert.
  */
 import path from "path";
-import fontkit from "fontkit";
-import React from "react";
+// Namespace import, not a default import: fontkit's ESM build has named exports
+// only. Jest's CommonJS interop tolerates a default import, but the production
+// bundle resolves it to undefined and every render then throws on openSync.
+import * as fontkit from "fontkit";
+import type { ReactNode, createElement as ReactCreateElement } from "react";
 import {
   Document,
   Page,
@@ -59,7 +62,27 @@ import {
   preferDateLabel,
 } from "@/lib/resume/date-format";
 
-const h = React.createElement;
+// Elements must be created by the same React package that @react-pdf/renderer
+// uses. That library is loaded from node_modules at runtime
+// (serverExternalPackages), so its reconciler runs on the installed React.
+// Inside an App Router route handler, however, the bundler rewrites
+// `import "react"` to Next's vendored React, whose elements carry a different
+// $$typeof; the reconciler rejects them ("Objects are not valid as a React
+// child", React error #31). Tests cannot see this because they have one React.
+// So React is resolved here through Node's own resolver, never the bundler's.
+// It is loaded lazily so that importing this module has no side effects.
+type ReactRuntime = { createElement: (...args: unknown[]) => unknown };
+let runtimeReact: ReactRuntime | null = null;
+function reactRuntime(): ReactRuntime {
+  if (!runtimeReact) {
+    const nodeModule = process.getBuiltinModule("node:module");
+    const nativeRequire = nodeModule.createRequire(path.join(process.cwd(), "package.json"));
+    runtimeReact = nativeRequire("react") as ReactRuntime;
+  }
+  return runtimeReact;
+}
+const h = ((...args: unknown[]) =>
+  reactRuntime().createElement(...args)) as unknown as typeof ReactCreateElement;
 
 // Deep-navy accent on a white sheet. Serif name over a clean body: the name is
 // always the serif face; body/labels follow the chosen font (serif or sans).
@@ -290,7 +313,7 @@ function projectDateRange(startDate: string | null, endDate: string | null): str
     .join(" – ");
 }
 
-function section(st: Styles, label: string, body: React.ReactNode) {
+function section(st: Styles, label: string, body: ReactNode) {
   // No wrap:false here. A section taller than a page must FLOW onto additional
   // pages (which the page counter then rejects so a denser profile is tried, or
   // overflow is thrown). wrap:false would instead clip an over-tall section onto
@@ -311,7 +334,7 @@ function ResumeDocument(input: StructuredResumeExportInput, d: Density, opts: Re
   const projects = input.projects ?? [];
   const certs = input.certifications.filter((ct) => clean(ct.name));
 
-  const children: React.ReactNode[] = [];
+  const children: ReactNode[] = [];
 
   // Header (left-aligned, premium)
   children.push(

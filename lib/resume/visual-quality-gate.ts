@@ -1,8 +1,8 @@
 import { runVisualQA } from "@/agents/visual-qa";
 import { db } from "@/lib/db/client";
 import { loadStructuredResumeSource } from "@/lib/export/structured-resume-input";
-import { type StructuredResumeExportInput } from "@/lib/export/structured-resume-pdf";
 import { renderResumePdf } from "@/lib/export/render-resume-pdf";
+import { expectedSectionsFor } from "@/lib/resume/expected-sections";
 import { storage } from "@/lib/storage/adapter";
 
 export const VISUAL_QA_SECTION = "visual_qa";
@@ -107,18 +107,5 @@ export async function runResumeVisualQualityGate(resumeId: string) {
   return persisted;
 }
 
-export function expectedSectionsFor(input: StructuredResumeExportInput): string[] {
-  const sections: string[] = [];
-  if (input.summary) sections.push("Professional Summary");
-  if (input.skills.length > 0) {
-    sections.push(
-      input.roleType === "TECHNICAL" || input.roleType === "DATA"
-        ? "Technical Skills"
-        : "Core Skills"
-    );
-  }
-  if (input.jobs.length > 0) sections.push("Professional Experience");
-  if (input.education.length > 0) sections.push("Education");
-  if (input.certifications.length > 0) sections.push("Certifications");
-  return sections;
-}
+// Re-exported so existing callers keep importing it from this module.
+export { expectedSectionsFor };
